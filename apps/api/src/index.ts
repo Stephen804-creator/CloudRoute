@@ -1,11 +1,14 @@
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { config } from "dotenv";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAccountRoutes } from "./routes/accounts.js";
 import { registerResourceRoutes } from "./routes/resources.js";
 import type { AuthContext } from "./auth/session.js";
+
+config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"), override: false });
 
 const app = Fastify({ logger: process.env.NODE_ENV !== "test", bodyLimit: 1_048_576 });
 app.decorateRequest("authContext", null as AuthContext | null);
