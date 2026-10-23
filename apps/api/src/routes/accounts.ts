@@ -45,10 +45,16 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
     try {
       const result = await withOrgTransaction(request.authContext.orgId, (client) => client.query(
         "INSERT INTO cloud_accounts(org_id, provider, display_name, external_account_id, role_arn, external_id) " +
-        "VALUES ($1,'aws',$2,$3,$4,$5) RETURNING id, provider, display_name AS \"displayName\", external_account_id AS \"accountId\", status",
+        "VALUES ($1,'aws',$2,$3,$4,$5) " +
+        "ON CONFLICT (org_id,provider,external_account_id) DO UPDATE SET display_name=EXCLUDED.display_name, role_arn=EXCLUDED.role_arn, external_id=EXCLUDED.external_id, status='pending', permission_status='not_checked', disconnected_at=NULL, last_error_code=NULL, updated_at=now() " +
+        "RETURNING id, provider, display_name AS \"displayName\", external_account_id AS \"accountId\", status",
         [request.authContext!.orgId, displayName, accountId, roleArn || null, externalId],
       ));
       const account = result.rows[0];
+      await withOrgTransaction(request.authContext.orgId, (client) => client.query(
+        "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_RECONNECTED' WHERE cloud_account_id=$1 AND org_id=$2 AND status IN ('queued','running')",
+        [account.id, request.authContext!.orgId],
+      ));
       await withOrgTransaction(request.authContext.orgId, (client) => client.query(
         "INSERT INTO audit_log(org_id, actor_user_id, action, target_type, target_id, details) VALUES ($1,$2,'cloud_account.created','cloud_account',$3,$4::jsonb)",
         [request.authContext!.orgId, request.authContext!.userId, account.id, JSON.stringify({ provider: "aws", accountId })],
