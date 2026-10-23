@@ -6,7 +6,7 @@ const labels = new Set(["unclassified", "retain", "migrate", "retire", "review"]
 const providers = new Set(["aws", "gcp"]);
 function csvCell(value: unknown): string {
   const text = value === null || value === undefined ? "" : typeof value === "string" ? value : JSON.stringify(value);
-  const safe = /^[=+\\-@]/.test(text.trimStart()) ? "'" + text : text;
+  const safe = /^(=|\\+|-|@)/.test(text.trimStart()) ? "'" + text : text;
   return '"' + safe.replace(/"/g, '""') + '"';
 }
 
