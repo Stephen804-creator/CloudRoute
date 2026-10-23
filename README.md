@@ -11,14 +11,14 @@ Units 1–7 are being developed on the `build/units-2-7` branch and reviewed bef
 - TypeScript pnpm monorepo with Next.js, Fastify API, PostgreSQL, a separate worker, and AWS connector packages.
 - PostgreSQL schema for users, organizations, memberships, sessions, accounts, resources, costs, findings, sync runs, audit log, and migration labels.
 - Organization-scoped transactions and row-level security policies.
-- Email/password authentication with scrypt password hashes and opaque, hashed server-side sessions.
+- Email/password authentication with scrypt password hashes, opaque hashed sessions, and optional state-checked Google OAuth.
 - Read-only AWS role onboarding with an external ID and STS role assumption.
 - AWS metadata inventory for EC2 instances, EBS volumes, snapshots, Elastic IPs, S3 bucket metadata, RDS databases, Lambda function metadata, and load balancers.
 - Idempotent inventory sync, hourly refresh scheduling, partial-run safety, and Redis/BullMQ with PostgreSQL queue fallback.
 - Searchable/filterable inventory, migration labels, CSV export, account status, and an overview dashboard.
 - CI uses a non-superuser PostgreSQL role and attempts cross-tenant reads and writes.
 
-Google Cloud integration, provider cost ingestion, savings rules, email digests, and production deployment are not claimed as complete in Units 2–7.
+Google Cloud integration, provider cost ingestion, savings rules, email digests, password-signup email verification, and production deployment are not claimed as complete in Units 2–7.
 
 ## Stack
 
