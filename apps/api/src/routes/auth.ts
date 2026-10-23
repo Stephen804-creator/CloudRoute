@@ -102,6 +102,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           if (!userId) throw error;
         }
       }
+      if (!userId) throw new Error("GOOGLE_USER_RESOLUTION_FAILED");
       await createSession(userId, reply);
       return reply.redirect("/app");
     } catch {
