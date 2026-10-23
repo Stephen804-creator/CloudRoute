@@ -12,7 +12,7 @@ export function getPool(): Pool {
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
       application_name: "cloudroute",
-      ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: true } : undefined,
+      ...(process.env.DATABASE_SSL === "true" ? { ssl: { rejectUnauthorized: true } } : {}),
     });
     pool.on("error", (error) => {
       console.error("Unexpected idle PostgreSQL client error", { message: error.message });
