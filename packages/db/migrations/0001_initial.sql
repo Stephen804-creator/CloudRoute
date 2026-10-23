@@ -185,9 +185,13 @@ CREATE TABLE migration_labels (
 );
 
 CREATE OR REPLACE FUNCTION cloudroute_current_org_id() RETURNS uuid
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE AS $
   SELECT NULLIF(current_setting('app.current_org_id', true), '')::uuid
-$$;
+$;
+CREATE OR REPLACE FUNCTION cloudroute_current_user_id() RETURNS uuid
+LANGUAGE sql STABLE AS $
+  SELECT NULLIF(current_setting('app.current_user_id', true), '')::uuid
+$;
 
 DO $$
 DECLARE table_name text;
@@ -203,7 +207,13 @@ BEGIN
       table_name
     );
   END LOOP;
-END $$;
+END $;
+DROP POLICY tenant_isolation ON memberships;
+CREATE POLICY tenant_isolation ON memberships
+  USING (org_id = cloudroute_current_org_id() OR user_id = cloudroute_current_user_id())
+  WITH CHECK (org_id = cloudroute_current_org_id());
+ALTER TABLE cloud_accounts DROP CONSTRAINT cloud_accounts_check;
+ALTER TABLE cloud_accounts ADD CONSTRAINT cloud_accounts_check CHECK (provider <> 'aws' OR external_id IS NOT NULL);
 
 CREATE OR REPLACE FUNCTION prevent_audit_mutation() RETURNS trigger
 LANGUAGE plpgsql AS $$
