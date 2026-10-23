@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-interface Account { id: string; provider: string; displayName: string; accountId: string; status: string; permissionStatus: string; lastSyncAt: string | null; lastSyncStatus: string | null }
+interface Account { id: string; provider: string; displayName: string; accountId: string; roleArn?: string | null; status: string; permissionStatus: string; lastSyncAt: string | null; lastSyncStatus: string | null }
 interface Setup { configured: boolean; principalArn: string | null }
 interface AccountResponse { account: Account; externalId: string; nextStep: string }
 
@@ -50,6 +50,17 @@ export default function AccountsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "Could not save the role."); }
     finally { setBusy(false); }
   }
+  async function resumeSetup(id: string) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const data = await api("/v1/accounts/" + id + "/setup");
+      setCreated(data); setAccountId(data.account.accountId); setDisplayName(data.account.displayName); setRoleArn(data.account.roleArn ?? "");
+      setNotice("AWS setup restored. Continue with the external ID and role trust policy.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not resume setup."); }
+    finally { setBusy(false); }
+  }
+
   async function validate(id: string) {
     setBusy(true); setError(""); setNotice("");
     try {
@@ -101,7 +112,7 @@ export default function AccountsPage() {
     </div>
 
     <section className="content-panel accounts-table-panel"><div className="panel-heading"><div><h2>Connected accounts</h2><p>Current state, permission validation, and sync status.</p></div><span className="count-chip">{accounts.length}</span></div>
-      {!accounts.length ? <p className="empty-copy">No cloud accounts connected yet. Your workspace remains empty until a real provider connection is validated.</p> : <div className="account-list">{accounts.map((account) => <div className="account-row account-manage-row" key={account.id}><span className={"provider-icon " + account.provider}>{account.provider === "aws" ? "A" : "G"}</span><div className="account-main"><strong>{account.displayName}</strong><small>{account.provider.toUpperCase()} · {account.accountId} · Permission: {account.permissionStatus.replaceAll("_", " ")}</small><small>{account.lastSyncAt ? "Last sync " + new Date(account.lastSyncAt).toLocaleString() : "Inventory has not synced yet"}</small></div><span className={"status-pill " + account.status}>{account.status}</span><div className="account-actions"><button className="secondary-button" disabled={busy || account.provider !== "aws"} onClick={() => void validate(account.id)}>Validate / sync</button><button className="text-button danger-text" onClick={() => void disconnect(account.id)}>Disconnect</button></div></div>)}</div>}
+      {!accounts.length ? <p className="empty-copy">No cloud accounts connected yet. Your workspace remains empty until a real provider connection is validated.</p> : <div className="account-list">{accounts.map((account) => <div className="account-row account-manage-row" key={account.id}><span className={"provider-icon " + account.provider}>{account.provider === "aws" ? "A" : "G"}</span><div className="account-main"><strong>{account.displayName}</strong><small>{account.provider.toUpperCase()} · {account.accountId} · Permission: {account.permissionStatus.replaceAll("_", " ")}</small><small>{account.lastSyncAt ? "Last sync " + new Date(account.lastSyncAt).toLocaleString() : "Inventory has not synced yet"}</small></div><span className={"status-pill " + account.status}>{account.status}</span><div className="account-actions">{account.provider === "aws" && account.permissionStatus !== "valid" && <button className="secondary-button" disabled={busy} onClick={() => void resumeSetup(account.id)}>Continue setup</button>}<button className="secondary-button" disabled={busy || account.provider !== "aws"} onClick={() => void validate(account.id)}>Validate / sync</button><button className="text-button danger-text" onClick={() => void disconnect(account.id)}>Disconnect</button></div></div>)}</div>}
     </section>
     <p className="data-footnote">Google Cloud connection is not implemented in Units 2–7 yet. No provider data is simulated on this page.</p>
   </div>;
