@@ -41,6 +41,7 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
     const inventory = await fetchAwsInventory(credentials, account.external_account_id);
     let created = 0;
     let updated = 0;
+    let missing = 0;
     const startedAt = claimed.rows[0].started_at;
     await withOrgTransaction(job.orgId, async (client) => {
       for (const item of inventory.resources) {
@@ -54,15 +55,16 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
         if (upsert.rows[0]?.inserted) created++; else updated++;
       }
       if (inventory.complete) {
-        await client.query(
+        const markedMissing = await client.query(
           "UPDATE resources SET deleted_detected_at=now(), updated_at=now() WHERE org_id=$1 AND cloud_account_id=$2 AND last_seen_at < $3 AND deleted_detected_at IS NULL",
           [job.orgId, account.id, startedAt],
         );
+        missing = markedMissing.rowCount ?? 0;
       }
       const status = inventory.complete ? "succeeded" : "partial";
       await client.query(
-        "UPDATE sync_runs SET status=$2, finished_at=now(), resources_seen=$3, resources_created=$4, resources_updated=$5, error_code=$6, error_message=$7, is_complete=$8 WHERE id=$1 AND org_id=$9",
-        [job.syncRunId, status, inventory.resources.length, created, updated, inventory.complete ? null : "PARTIAL_PROVIDER_RESPONSE", inventory.complete ? null : inventory.warnings.slice(0, 20).join(","), inventory.complete, job.orgId],
+        "UPDATE sync_runs SET status=$2, finished_at=now(), resources_seen=$3, resources_created=$4, resources_updated=$5, resources_missing=$6, error_code=$7, error_message=$8, is_complete=$9 WHERE id=$1 AND org_id=$10",
+        [job.syncRunId, status, inventory.resources.length, created, updated, missing, inventory.complete ? null : "PARTIAL_PROVIDER_RESPONSE", inventory.complete ? null : inventory.warnings.slice(0, 20).join(","), inventory.complete, job.orgId],
       );
       await client.query(
         "UPDATE cloud_accounts SET status=$3, last_sync_at=now(), last_sync_status=$4, last_error_code=$5, updated_at=now() WHERE id=$1 AND org_id=$2",
