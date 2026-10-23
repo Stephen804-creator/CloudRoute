@@ -32,12 +32,16 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
 
   const s3 = new S3Client({ region: "us-east-1", credentials });
   try {
-    const result = await s3.send(new ListBucketsCommand({}));
-    for (const bucket of result.Buckets ?? []) if (bucket.Name) resources.push({
-      externalId: "arn:aws:s3:::" + bucket.Name, resourceType: "object_bucket", displayName: bucket.Name,
-      region: null, resourceStatus: "available", tags: {},
-      metadata: { creationDate: bucket.CreationDate?.toISOString() ?? null, scope: "bucket-metadata-only" },
-    });
+    let token: string | undefined;
+    do {
+      const result = await s3.send(new ListBucketsCommand({ ContinuationToken: token, MaxBuckets: 1000 }));
+      for (const bucket of result.Buckets ?? []) if (bucket.Name) resources.push({
+        externalId: "arn:aws:s3:::" + bucket.Name, resourceType: "object_bucket", displayName: bucket.Name,
+        region: null, resourceStatus: "available", tags: {},
+        metadata: { creationDate: bucket.CreationDate?.toISOString() ?? null, scope: "bucket-metadata-only" },
+      });
+      token = result.ContinuationToken;
+    } while (token);
   } catch { warnings.push("S3_BUCKET_LIST_FAILED"); } finally { s3.destroy(); }
 
   for (const region of regions) {
@@ -56,13 +60,17 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
       } while (token);
     } catch { warnings.push("EC2_INSTANCES_FAILED:" + region); }
     try {
-      const result = await ec2.send(new DescribeVolumesCommand({ MaxResults: 500 }));
-      for (const volume of result.Volumes ?? []) if (volume.VolumeId) resources.push({
-        externalId: arn(accountId, region, "ec2", "volume/" + volume.VolumeId), resourceType: "block_volume",
-        displayName: volume.Tags?.find((tag) => tag.Key === "Name")?.Value ?? volume.VolumeId, region,
-        resourceStatus: volume.State ?? null, tags: tagsToRecord(volume.Tags),
-        metadata: { sizeGiB: volume.Size ?? null, volumeType: volume.VolumeType ?? null, encrypted: volume.Encrypted ?? null, attached: Boolean(volume.Attachments?.length) },
-      });
+      let token: string | undefined;
+      do {
+        const result = await ec2.send(new DescribeVolumesCommand({ NextToken: token, MaxResults: 500 }));
+        for (const volume of result.Volumes ?? []) if (volume.VolumeId) resources.push({
+          externalId: arn(accountId, region, "ec2", "volume/" + volume.VolumeId), resourceType: "block_volume",
+          displayName: volume.Tags?.find((tag) => tag.Key === "Name")?.Value ?? volume.VolumeId, region,
+          resourceStatus: volume.State ?? null, tags: tagsToRecord(volume.Tags),
+          metadata: { sizeGiB: volume.Size ?? null, volumeType: volume.VolumeType ?? null, encrypted: volume.Encrypted ?? null, attached: Boolean(volume.Attachments?.length) },
+        });
+        token = result.NextToken;
+      } while (token);
     } catch { warnings.push("EC2_VOLUMES_FAILED:" + region); }
     try {
       const result = await ec2.send(new DescribeAddressesCommand({}));
@@ -74,13 +82,17 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
       });
     } catch { warnings.push("EC2_ADDRESSES_FAILED:" + region); }
     try {
-      const result = await ec2.send(new DescribeSnapshotsCommand({ OwnerIds: ["self"], MaxResults: 1000 }));
-      for (const snapshot of result.Snapshots ?? []) if (snapshot.SnapshotId) resources.push({
-        externalId: arn(accountId, region, "ec2", "snapshot/" + snapshot.SnapshotId), resourceType: "snapshot",
-        displayName: snapshot.Tags?.find((tag) => tag.Key === "Name")?.Value ?? snapshot.SnapshotId, region,
-        resourceStatus: snapshot.State ?? null, tags: tagsToRecord(snapshot.Tags),
-        metadata: { volumeSizeGiB: snapshot.VolumeSize ?? null, encrypted: snapshot.Encrypted ?? null, startTime: snapshot.StartTime?.toISOString() ?? null },
-      });
+      let token: string | undefined;
+      do {
+        const result = await ec2.send(new DescribeSnapshotsCommand({ OwnerIds: ["self"], NextToken: token, MaxResults: 1000 }));
+        for (const snapshot of result.Snapshots ?? []) if (snapshot.SnapshotId) resources.push({
+          externalId: arn(accountId, region, "ec2", "snapshot/" + snapshot.SnapshotId), resourceType: "snapshot",
+          displayName: snapshot.Tags?.find((tag) => tag.Key === "Name")?.Value ?? snapshot.SnapshotId, region,
+          resourceStatus: snapshot.State ?? null, tags: tagsToRecord(snapshot.Tags),
+          metadata: { volumeSizeGiB: snapshot.VolumeSize ?? null, encrypted: snapshot.Encrypted ?? null, startTime: snapshot.StartTime?.toISOString() ?? null },
+        });
+        token = result.NextToken;
+      } while (token);
     } catch { warnings.push("EC2_SNAPSHOTS_FAILED:" + region); }
     ec2.destroy();
 
