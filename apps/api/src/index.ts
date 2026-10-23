@@ -1,9 +1,10 @@
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import Fastify from "fastify";
 
 const app = Fastify({
   logger: process.env.NODE_ENV !== "test",
   bodyLimit: 1_048_576,
-  disableRequestLogging: false,
 });
 
 app.get("/health", async () => ({
@@ -19,7 +20,12 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535) {
   throw new Error("PORT must be an integer between 1 and 65535");
 }
 
-if (process.env.NODE_ENV !== "test") {
+const invokedPath = process.argv[1];
+const isEntrypoint =
+  invokedPath !== undefined &&
+  import.meta.url === pathToFileURL(resolve(invokedPath)).href;
+
+if (isEntrypoint) {
   try {
     await app.listen({ port, host });
   } catch (error) {
