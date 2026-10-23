@@ -21,7 +21,8 @@
     "@aws-sdk/client-elastic-load-balancing-v2": "^3.883.0",
     "fastify": "^5.4.0",
     "bullmq": "^5.58.5",
-    "ioredis": "^5.7.0"
+    "ioredis": "^5.7.0",
+    "google-auth-library": "^10.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
