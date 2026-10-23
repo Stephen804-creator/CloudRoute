@@ -119,12 +119,20 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
         "UPDATE cloud_accounts SET status='connected', permission_status='valid', last_error_code=NULL, updated_at=now() WHERE id=$1 AND org_id=$2",
         [account.id, request.authContext!.orgId],
       ));
-      const run = await withOrgTransaction(request.authContext.orgId, (client) => client.query(
-        "INSERT INTO sync_runs(org_id, cloud_account_id, job_type, status) VALUES ($1,$2,'inventory_sync','queued') RETURNING id",
-        [request.authContext!.orgId, account.id],
-      ));
-      try { await enqueueInventorySync({ syncRunId: run.rows[0]!.id, orgId: request.authContext.orgId, accountId: account.id }); } catch { /* The worker also polls durable PostgreSQL queue rows. */ }
-      return reply.send({ status: "connected", accountId: returnedAccountId, syncRunId: run.rows[0]!.id, message: "AWS role assumption succeeded. Initial inventory synchronization has been queued." });
+      const run = await withOrgTransaction(request.authContext.orgId, async (client) => {
+        const existing = await client.query<{ id: string }>(
+          "SELECT id FROM sync_runs WHERE org_id=$1 AND cloud_account_id=$2 AND job_type='inventory_sync' AND status IN ('queued','running') ORDER BY created_at DESC LIMIT 1",
+          [request.authContext!.orgId, account.id],
+        );
+        if (existing.rows[0]) return { id: existing.rows[0].id };
+        const inserted = await client.query<{ id: string }>(
+          "INSERT INTO sync_runs(org_id, cloud_account_id, job_type, status) VALUES ($1,$2,'inventory_sync','queued') RETURNING id",
+          [request.authContext!.orgId, account.id],
+        );
+        return { id: inserted.rows[0]!.id };
+      });
+      try { await enqueueInventorySync({ syncRunId: run.id, orgId: request.authContext.orgId, accountId: account.id }); } catch { /* The worker also polls durable PostgreSQL queue rows. */ }
+      return reply.send({ status: "connected", accountId: returnedAccountId, syncRunId: run.id, message: "AWS role assumption succeeded. Initial inventory synchronization has been queued." });
     } catch (error) {
       const name = (error as { name?: string }).name ?? "AWS_CONNECTION_FAILED";
       const mapped = name === "AccessDenied" || name === "AccessDeniedException" ? "AWS_ROLE_ACCESS_DENIED" : "AWS_CONNECTION_FAILED";
