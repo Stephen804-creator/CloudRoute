@@ -1,0 +1,21 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudRouteReadOnlyInventory",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeRegions",
+        "ec2:DescribeInstances",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeAddresses",
+        "ec2:DescribeSnapshots",
+        "s3:ListAllMyBuckets",
+        "rds:DescribeDBInstances",
+        "lambda:ListFunctions",
+        "elasticloadbalancing:DescribeLoadBalancers"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

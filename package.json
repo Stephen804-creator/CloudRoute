@@ -1,6 +1,6 @@
 {
   "name": "cloudroute",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "packageManager": "pnpm@10.12.1",
   "engines": {
@@ -8,11 +8,14 @@
   },
   "scripts": {
     "dev:api": "pnpm --filter @cloudroute/api dev",
+    "dev:web": "pnpm --filter @cloudroute/web dev",
     "dev:worker": "pnpm --filter @cloudroute/worker dev",
+    "db:migrate": "pnpm --filter @cloudroute/db migrate",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "format:check": "prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "build": "pnpm -r --if-present build"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

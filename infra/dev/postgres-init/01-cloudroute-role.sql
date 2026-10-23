@@ -1,0 +1,3 @@
+CREATE ROLE cloudroute_app LOGIN PASSWORD 'cloudroute_dev_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+ALTER DATABASE cloudroute OWNER TO cloudroute_app;
+GRANT ALL ON SCHEMA public TO cloudroute_app;

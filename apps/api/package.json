@@ -8,9 +8,23 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test src/index.test.ts"
+    "test": "tsx --test src/index.test.ts src/auth/password.test.ts"
   },
-  "dependencies": { "fastify": "^5.4.0" },
+  "dependencies": {
+    "@cloudroute/db": "workspace:*",
+    "@fastify/cookie": "^11.0.2",
+    "@aws-sdk/client-sts": "^3.883.0",
+    "@aws-sdk/client-ec2": "^3.883.0",
+    "@aws-sdk/client-s3": "^3.883.0",
+    "@aws-sdk/client-rds": "^3.883.0",
+    "@aws-sdk/client-lambda": "^3.883.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.883.0",
+    "fastify": "^5.4.0",
+    "bullmq": "^5.58.5",
+    "ioredis": "^5.7.0",
+    "google-auth-library": "^10.3.0",
+    "dotenv": "^16.6.1"
+  },
   "devDependencies": {
     "@types/node": "^22.15.30",
     "tsx": "^4.20.3",

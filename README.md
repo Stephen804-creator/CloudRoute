@@ -1,79 +1,79 @@
 # CloudRoute
 
-CloudRoute is a read-first, multi-cloud visibility platform that brings cloud inventory, cost information, synchronization status, and savings findings into one workspace.
+CloudRoute is a read-first multi-cloud visibility platform for cloud resource inventory, cost visibility, synchronization health, and potential savings. The MVP focuses on AWS first; Google Cloud connector implementation follows after the initial AWS workflow is validated.
 
-## MVP boundaries
+**Safety boundary:** MVP access is read-only. CloudRoute must not create, modify, or delete customer cloud resources. It does not read data inside customer buckets, databases, or disks, and it does not store Lambda environment variables. Missing resources are marked as deleted only after a complete successful inventory run.
 
-The MVP connects AWS and Google Cloud using read-only permissions. It inventories supported resources, presents cost data with clear attribution and freshness, identifies a small set of potential savings, and records simple migration labels.
+## Current implementation
 
-**CloudRoute must not create, modify, or delete customer cloud resources in the MVP.** Demo data must be clearly separated from connected-provider data. Missing or stale provider data must never be presented as current.
+Units 1–7 are being developed on the `build/units-2-7` branch and reviewed before merging.
 
-## Planned stack
+- TypeScript pnpm monorepo with Next.js, Fastify API, PostgreSQL, a separate worker, and AWS connector packages.
+- PostgreSQL schema for users, organizations, memberships, sessions, accounts, resources, costs, findings, sync runs, audit log, and migration labels.
+- Organization-scoped transactions and row-level security policies.
+- Email/password authentication with scrypt password hashes, opaque hashed sessions, and optional state-checked Google OAuth.
+- Read-only AWS role onboarding with an external ID and STS role assumption.
+- AWS metadata inventory for EC2 instances, EBS volumes, snapshots, Elastic IPs, S3 bucket metadata, RDS databases, Lambda function metadata, and load balancers.
+- Idempotent inventory sync, hourly refresh scheduling, partial-run safety, and Redis/BullMQ with PostgreSQL queue fallback.
+- Searchable/filterable inventory, migration labels, CSV export, account status, and an overview dashboard.
+- CI uses a non-superuser PostgreSQL role and attempts cross-tenant reads and writes.
 
-- **Web:** Next.js, React, TypeScript
-- **API:** Node.js, Fastify, TypeScript, REST/OpenAPI
-- **Worker:** separate Node.js process for scheduled synchronization
-- **Data:** PostgreSQL with organization-level tenant isolation and row-level security
-- **Queue/cache:** Redis and BullMQ when synchronization is introduced
-- **Providers:** AWS and Google Cloud read-only connectors
-- **Repository:** pnpm workspace monorepo
+Google Cloud integration, provider cost ingestion, savings rules, email digests, password-signup email verification, and production deployment are not claimed as complete in Units 2–7.
 
-## Repository layout
+## Stack
 
-```text
-apps/
-  api/                 REST API
-  web/                 web application
-  worker/              background synchronization process
-packages/
-  shared/              shared types and utilities
-  connector-sdk/       provider-neutral connector contracts
-  connector-aws/       AWS connector
-  connector-gcp/       Google Cloud connector
-  db/                  database schema and migrations
-docs/
-  architecture/        architecture decisions
-  security/             security and permission guidance
-infra/                  infrastructure definitions (later unit)
-```
+- Node.js 22+ and pnpm 10+
+- Next.js / React / TypeScript
+- Fastify REST API
+- PostgreSQL with row-level security
+- Redis / BullMQ (optional locally; PostgreSQL polling fallback is included)
+- AWS SDK v3 with temporary STS role credentials
 
-## Requirements
+## Local development
 
-- Node.js 22 or newer
-- pnpm 10 or newer
+Follow [docs/LOCAL-DEVELOPMENT.md](docs/LOCAL-DEVELOPMENT.md).
 
-Install dependencies:
+Quick setup:
 
 ```bash
+cp .env.example .env
+docker compose up -d
 corepack enable
 pnpm install
+pnpm db:migrate
+pnpm dev:api
+pnpm dev:worker
+pnpm dev:web
 ```
 
-Start the API:
+Run the build, type checks, and tests:
 
 ```bash
-pnpm --filter @cloudroute/api dev
+pnpm build
+pnpm typecheck
+pnpm test
 ```
 
-The API listens on `PORT` (default `4000`) and exposes `GET /health`. This endpoint reports application liveness only; it does not claim that cloud providers or a database are connected.
+## AWS connection requirements
 
-## Environment configuration
+The account connection flow creates a unique external ID, accepts a customer-created IAM role ARN, validates it using STS, and queues inventory. CloudRoute never asks for long-lived AWS access keys.
 
-Copy `.env.example` to `.env` for local development. Never commit real credentials, cloud keys, tokens, or production secrets. The initial foundation does not require cloud credentials.
+See:
+- [AWS read-only permissions](docs/security/aws-read-only-policy.json)
+- [AWS trust policy template](docs/security/aws-role-trust-template.json)
+- [Security baseline](docs/security/SECURITY.md)
 
-## Development principles
+A live AWS connection requires a deployed CloudRoute runtime role. Set `CLOUDROUTE_AWS_PRINCIPAL_ARN` to that exact role ARN before using the onboarding wizard. Do not replace it with an unrelated or broad principal.
 
-1. Read-only cloud access for the MVP.
-2. Least privilege and explicit connection status.
-3. Preserve provider identifiers and raw payloads alongside normalized fields.
-4. Display data freshness and distinguish estimates from provider-reported costs.
-5. Enforce organization boundaries in the API and database.
-6. Never delete inventory based on a failed or partial synchronization.
-7. Add functionality in small, tested units; do not mark a feature complete until its acceptance checks pass.
+## Project documents
 
-## Status
+- [Unit 1–7 checklist](docs/UNIT-2-7-CHECKLIST.md)
+- [Local development](docs/LOCAL-DEVELOPMENT.md)
+- [Architecture decision: modular monolith](docs/architecture/decisions/0001-modular-monolith.md)
 
-Unit 1 establishes the monorepo, shared TypeScript conventions, API health endpoint, worker entry point, connector contracts, and security baseline. Provider integrations, authentication, database migrations, dashboard UI, and real synchronization are implemented in later units.
+## Security
+
+Never commit `.env`, customer credentials, access tokens, or raw cloud data. Use a dedicated non-superuser database role so row-level security is exercised. Review the exact requested provider permissions before connecting an account. The MVP is not production-ready until CI passes and the live integration and deployment checks in the checklist are completed.
 
 ## License
 
