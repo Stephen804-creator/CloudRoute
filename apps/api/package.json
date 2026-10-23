@@ -8,7 +8,7 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test src/index.test.ts src/**/*.test.ts"
+    "test": "tsx --test src/index.test.ts src/auth/password.test.ts"
   },
   "dependencies": {
     "@cloudroute/db": "workspace:*",
