@@ -28,6 +28,18 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
     return reply.send({ accounts: result.rows });
   });
 
+  app.get<{ Params: { id: string } }>("/v1/accounts/:id/setup", async (request, reply) => {
+    if (!request.authContext) return;
+    const result = await withOrgTransaction(request.authContext.orgId, (client) => client.query(
+      "SELECT id, provider, display_name AS \"displayName\", external_account_id AS \"accountId\", role_arn AS \"roleArn\", status, permission_status AS \"permissionStatus\", external_id AS \"externalId\" " +
+      "FROM cloud_accounts WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL",
+      [request.params.id, request.authContext!.orgId],
+    ));
+    if (!result.rows[0] || result.rows[0].provider !== "aws") return reply.code(404).send({ error: { code: "ACCOUNT_NOT_FOUND", message: "AWS setup was not found in this workspace." } });
+    const { externalId, ...account } = result.rows[0] as { externalId: string; [key: string]: unknown };
+    return reply.send({ account, externalId, nextStep: "Configure the read-only IAM role and validate the connection." });
+  });
+
   app.post<{ Body: AwsAccountBody }>("/v1/accounts/aws", async (request, reply) => {
     if (!request.authContext) return;
     const body = request.body ?? ({} as AwsAccountBody);
