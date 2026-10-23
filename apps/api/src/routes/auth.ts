@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { query, withTransaction } from "@cloudroute/db";
 import { authenticate } from "../auth/guard.js";
@@ -13,6 +13,102 @@ function validEmail(email: string): boolean {
 }
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/v1/auth/google", async (_request, reply) => {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    if (!clientId || !clientSecret) return reply.redirect("/login?error=google-not-configured");
+    const { OAuth2Client } = await import("google-auth-library");
+    const originValue = process.env.PUBLIC_APP_ORIGIN ?? "http://localhost:3000";
+    const origin = originValue.endsWith("/") ? originValue.slice(0, -1) : originValue;
+    const redirectUri = origin + "/v1/auth/google/callback";
+    const oauth = new OAuth2Client(clientId, clientSecret, redirectUri);
+    const state = randomBytes(32).toString("base64url");
+    reply.setCookie("cloudroute_google_state", state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/v1/auth/google/callback",
+      maxAge: 600,
+    });
+    return reply.redirect(oauth.generateAuthUrl({
+      access_type: "online",
+      scope: ["openid", "email", "profile"],
+      state,
+      include_granted_scopes: true,
+    }));
+  });
+
+  app.get<{ Querystring: { code?: string; state?: string; error?: string } }>("/v1/auth/google/callback", async (request, reply) => {
+    const stateCookie = request.cookies["cloudroute_google_state"];
+    reply.clearCookie("cloudroute_google_state", {
+      path: "/v1/auth/google/callback",
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
+    if (request.query.error || !stateCookie || !request.query.state || !request.query.code) {
+      return reply.redirect("/login?error=google-auth-failed");
+    }
+    const expectedState = Buffer.from(stateCookie);
+    const receivedState = Buffer.from(request.query.state);
+    if (expectedState.length !== receivedState.length || !timingSafeEqual(expectedState, receivedState)) {
+      return reply.redirect("/login?error=google-auth-failed");
+    }
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    if (!clientId || !clientSecret) return reply.redirect("/login?error=google-not-configured");
+
+    try {
+      const originValue = process.env.PUBLIC_APP_ORIGIN ?? "http://localhost:3000";
+      const origin = originValue.endsWith("/") ? originValue.slice(0, -1) : originValue;
+      const oauth = new (await import("google-auth-library")).OAuth2Client(
+        clientId, clientSecret, origin + "/v1/auth/google/callback",
+      );
+      const { tokens } = await oauth.getToken(request.query.code);
+      if (!tokens.id_token) throw new Error("GOOGLE_ID_TOKEN_MISSING");
+      const ticket = await oauth.verifyIdToken({ idToken: tokens.id_token, audience: clientId });
+      const profile = ticket.getPayload();
+      const email = profile?.email?.trim().toLowerCase();
+      if (!email || profile?.email_verified !== true) throw new Error("GOOGLE_EMAIL_NOT_VERIFIED");
+      const fullName = (profile.name?.trim() || email.split("@")[0] || "CloudRoute user").slice(0, 120);
+      const existing = await query<{ id: string }>("SELECT id FROM users WHERE email=$1", [email]);
+      let userId = existing.rows[0]?.id;
+      if (userId) {
+        await query("UPDATE users SET email_verified_at=COALESCE(email_verified_at,now()), updated_at=now() WHERE id=$1", [userId]);
+      } else {
+        try {
+          userId = await withTransaction(async (client) => {
+            const inserted = await client.query<{ id: string }>(
+              "INSERT INTO users(email,password_hash,full_name,email_verified_at) VALUES ($1,$2,$3,now()) RETURNING id",
+              [email, "oauth-only$" + randomBytes(32).toString("hex"), fullName],
+            );
+            const newUserId = inserted.rows[0]!.id;
+            const organizationName = (fullName.slice(0, 100) + "'s workspace").slice(0, 120);
+            const organization = await client.query<{ id: string }>(
+              "INSERT INTO organizations(name,created_by) VALUES ($1,$2) RETURNING id",
+              [organizationName, newUserId],
+            );
+            await client.query("SELECT set_config('app.current_org_id',$1,true)", [organization.rows[0]!.id]);
+            await client.query("INSERT INTO memberships(org_id,user_id,role) VALUES ($1,$2,'owner')", [organization.rows[0]!.id,newUserId]);
+            await client.query(
+              "INSERT INTO audit_log(org_id,actor_user_id,action,target_type,details) VALUES ($1,$2,'organization.created','organization',$3::jsonb)",
+              [organization.rows[0]!.id,newUserId,JSON.stringify({ source: "google_oauth" })],
+            );
+            return newUserId;
+          });
+        } catch (error) {
+          if ((error as { code?: string }).code !== "23505") throw error;
+          const raced = await query<{ id: string }>("SELECT id FROM users WHERE email=$1", [email]);
+          userId = raced.rows[0]?.id;
+          if (!userId) throw error;
+        }
+      }
+      await createSession(userId, reply);
+      return reply.redirect("/app");
+    } catch {
+      return reply.redirect("/login?error=google-auth-failed");
+    }
+  });
+
   app.post<{ Body: SignupBody }>("/v1/auth/signup", async (request, reply) => {
     const { email, password, fullName, organizationName } = request.body ?? ({} as SignupBody);
     const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
