@@ -38,6 +38,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           "INSERT INTO organizations(name, created_by) VALUES ($1, $2) RETURNING id",
           [orgName, userId],
         );
+        await client.query("SELECT set_config('app.current_org_id', $1, true)", [org.rows[0]!.id]);
         await client.query("INSERT INTO memberships(org_id, user_id, role) VALUES ($1, $2, 'owner')", [org.rows[0]!.id, userId]);
         await client.query(
           "INSERT INTO audit_log(org_id, actor_user_id, action, target_type, details) VALUES ($1, $2, 'organization.created', 'organization', $3::jsonb)",
