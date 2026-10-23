@@ -3,7 +3,9 @@
   "version": "0.2.0",
   "private": true,
   "packageManager": "pnpm@10.12.1",
-  "engines": { "node": ">=22.0.0" },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev:api": "pnpm --filter @cloudroute/api dev",
     "dev:web": "pnpm --filter @cloudroute/web dev",
@@ -12,7 +14,8 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "format:check": "prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "build": "pnpm -r --if-present build"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
