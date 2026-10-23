@@ -12,6 +12,11 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
     if (request.url.startsWith("/v1/accounts")) await authenticate(request, reply);
   });
 
+  app.get("/v1/security/aws-setup", async (_request, reply) => {
+    const principalArn = process.env.CLOUDROUTE_AWS_PRINCIPAL_ARN ?? null;
+    return reply.send({ configured: Boolean(principalArn), principalArn });
+  });
+
   app.get("/v1/accounts", async (request, reply) => {
     if (!request.authContext) return;
     const result = await withOrgTransaction(request.authContext.orgId, (client) => client.query(
@@ -118,7 +123,7 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
         "INSERT INTO sync_runs(org_id, cloud_account_id, job_type, status) VALUES ($1,$2,'inventory_sync','queued') RETURNING id",
         [request.authContext!.orgId, account.id],
       ));
-      await enqueueInventorySync({ syncRunId: run.rows[0]!.id, orgId: request.authContext.orgId, accountId: account.id });
+      try { await enqueueInventorySync({ syncRunId: run.rows[0]!.id, orgId: request.authContext.orgId, accountId: account.id }); } catch { /* The worker also polls durable PostgreSQL queue rows. */ }
       return reply.send({ status: "connected", accountId: returnedAccountId, syncRunId: run.rows[0]!.id, message: "AWS role assumption succeeded. Initial inventory synchronization has been queued." });
     } catch (error) {
       const name = (error as { name?: string }).name ?? "AWS_CONNECTION_FAILED";
