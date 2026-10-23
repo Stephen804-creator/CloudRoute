@@ -24,8 +24,18 @@ export async function registerResourceRoutes(app: FastifyInstance): Promise<void
     if (provider && !providers.has(provider)) return reply.code(400).send({ error: { code: "INVALID_PROVIDER", message: "Provider must be aws or gcp." } });
     if (label && !labels.has(label)) return reply.code(400).send({ error: { code: "INVALID_MIGRATION_LABEL", message: "Migration label is not supported." } });
     const limit = Math.max(1, Math.min(100, Number.parseInt(request.query.limit ?? "50", 10) || 50));
-    const cursor = request.query.cursor;
-    if (cursor && !/^\d{4}-\d\d-\d\dT/.test(cursor)) return reply.code(400).send({ error: { code: "INVALID_CURSOR", message: "Cursor must be an ISO timestamp." } });
+    let cursorTime: string | null = null;
+    let cursorId: string | null = null;
+    if (request.query.cursor) {
+      try {
+        const decoded = JSON.parse(Buffer.from(request.query.cursor, "base64url").toString("utf8")) as { lastSeenAt?: unknown; id?: unknown };
+        if (typeof decoded.lastSeenAt !== "string" || Number.isNaN(Date.parse(decoded.lastSeenAt)) || typeof decoded.id !== "string" || !/^[0-9a-f-]{36}$/i.test(decoded.id)) throw new Error("invalid cursor");
+        cursorTime = decoded.lastSeenAt;
+        cursorId = decoded.id;
+      } catch {
+        return reply.code(400).send({ error: { code: "INVALID_CURSOR", message: "Cursor is invalid. Refresh the inventory list and try again." } });
+      }
+    }
     const result = await withOrgTransaction(request.authContext.orgId, (client) => client.query(
       "SELECT r.id, r.provider, r.external_id AS \"externalId\", r.resource_type AS \"resourceType\", " +
       "r.display_name AS \"displayName\", r.region, r.resource_status AS status, r.tags, " +
@@ -36,12 +46,12 @@ export async function registerResourceRoutes(app: FastifyInstance): Promise<void
       "AND ($3::text IS NULL OR r.resource_type=$3) AND ($4::text IS NULL OR r.region=$4) " +
       "AND ($5::text IS NULL OR r.migration_label=$5) " +
       "AND ($6::text IS NULL OR (r.display_name ILIKE '%' || $6 || '%' OR r.external_id ILIKE '%' || $6 || '%')) " +
-      "AND ($7::timestamptz IS NULL OR r.last_seen_at < $7) ORDER BY r.last_seen_at DESC, r.id DESC LIMIT $8",
-      [request.authContext!.orgId, provider ?? null, type ?? null, region ?? null, label ?? null, q ?? null, cursor ?? null, limit + 1],
+      "AND ($7::timestamptz IS NULL OR (r.last_seen_at, r.id) < ($7::timestamptz, $8::uuid)) ORDER BY r.last_seen_at DESC, r.id DESC LIMIT $9",
+      [request.authContext!.orgId, provider ?? null, type ?? null, region ?? null, label ?? null, q ?? null, cursorTime, cursorId, limit + 1],
     ));
     const hasMore = result.rows.length > limit;
     const rows = result.rows.slice(0, limit);
-    return reply.send({ resources: rows, page: { limit, hasMore, nextCursor: hasMore ? rows[rows.length - 1]?.lastSeenAt ?? null : null } });
+    return reply.send({ resources: rows, page: { limit, hasMore, nextCursor: hasMore && rows[rows.length - 1] ? Buffer.from(JSON.stringify({ lastSeenAt: rows[rows.length - 1]!.lastSeenAt, id: rows[rows.length - 1]!.id })).toString("base64url") : null } });
   });
 
   app.get<{ Params: { id: string } }>("/v1/resources/:id", async (request, reply) => {
