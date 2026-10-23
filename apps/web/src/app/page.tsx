@@ -27,7 +27,7 @@ export default function HomePage() {
           <span className="brand-mark" aria-hidden="true">C</span>
           <span>CloudRoute</span>
         </a>
-        <div className="landing-nav"><span className="mode-badge"><span /> Read-only by design</span><a className="landing-signin" href="/login">Sign in</a><a className="landing-get-started" href="/signup">Get started <span aria-hidden="true">→</span></a></div>
+        <div className="landing-nav"><span className="mode-badge"><span /> Read-only by design</span><a className="landing-signin" href="/security">Security</a><a className="landing-signin" href="/login">Sign in</a><a className="landing-get-started" href="/signup">Get started <span aria-hidden="true">→</span></a></div>
       </header>
 
       <section className="hero">
