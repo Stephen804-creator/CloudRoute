@@ -27,7 +27,7 @@ export default function HomePage() {
           <span className="brand-mark" aria-hidden="true">C</span>
           <span>CloudRoute</span>
         </a>
-        <span className="mode-badge"><span /> Read-only by design</span>
+        <div className="landing-nav"><span className="mode-badge"><span /> Read-only by design</span><a className="landing-signin" href="/login">Sign in</a><a className="landing-get-started" href="/signup">Get started <span aria-hidden="true">→</span></a></div>
       </header>
 
       <section className="hero">
@@ -38,7 +38,7 @@ export default function HomePage() {
           across providers — without giving a dashboard permission to change your infrastructure.
         </p>
         <div className="hero-actions">
-          <a className="primary-button" href="#capabilities">Explore the foundation <span aria-hidden="true">→</span></a>
+          <a className="primary-button" href="/signup">Create your workspace <span aria-hidden="true">→</span></a>
           <span className="build-status"><span className="status-dot" /> Foundation in progress</span>
         </div>
         <div className="notice" role="note">
