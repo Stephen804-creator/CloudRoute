@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 import { closePool } from "@cloudroute/db";
 import { pollQueuedRunsOnce, processInventorySync } from "./sync.js";
 import { scheduleHourlyInventoryRunsOnce } from "./scheduler.js";
@@ -13,7 +13,7 @@ async function main(): Promise<void> {
   }, 60_000);
   const redisUrl = process.env.REDIS_URL;
   if (redisUrl) {
-    const connection = new IORedis(redisUrl, { maxRetriesPerRequest: null, enableReadyCheck: true });
+    const connection = new Redis(redisUrl, { maxRetriesPerRequest: null, enableReadyCheck: true });
     const worker = new Worker<InventoryJob>("cloudroute-inventory", async (job) => processInventorySync(job.data), {
       connection,
       concurrency: Math.max(1, Math.min(8, Number.parseInt(process.env.WORKER_CONCURRENCY ?? "2", 10) || 2)),
