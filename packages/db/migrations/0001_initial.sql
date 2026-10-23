@@ -187,11 +187,11 @@ CREATE TABLE migration_labels (
 CREATE OR REPLACE FUNCTION cloudroute_current_org_id() RETURNS uuid
 LANGUAGE sql STABLE AS $$
   SELECT NULLIF(current_setting('app.current_org_id', true), '')::uuid
-$;
+$$;
 CREATE OR REPLACE FUNCTION cloudroute_current_user_id() RETURNS uuid
 LANGUAGE sql STABLE AS $$
   SELECT NULLIF(current_setting('app.current_user_id', true), '')::uuid
-$;
+$$;
 
 DO $$
 DECLARE table_name text;
