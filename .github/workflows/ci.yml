@@ -15,8 +15,35 @@ permissions:
 
 jobs:
   validate:
-    name: Build, typecheck, and test
+    name: Build, typecheck, test, and tenant isolation
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://cloudroute_app:cloudroute_ci_password@localhost:5432/cloudroute
+      DATABASE_SSL: "false"
+      REDIS_URL: redis://localhost:6379
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cloudroute
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cloudroute"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -30,9 +57,19 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
+      - name: Create non-superuser application role
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d cloudroute -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE cloudroute_app LOGIN PASSWORD 'cloudroute_ci_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;" \
+            -c "ALTER DATABASE cloudroute OWNER TO cloudroute_app;" \
+            -c "GRANT ALL ON SCHEMA public TO cloudroute_app;"
+      - name: Apply database migrations
+        run: pnpm db:migrate
       - name: Build workspace packages in dependency order
         run: pnpm build
       - name: Typecheck workspace
         run: pnpm typecheck
-      - name: Run tests
+      - name: Run tests including PostgreSQL tenant isolation
         run: pnpm test
