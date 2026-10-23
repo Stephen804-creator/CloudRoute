@@ -86,11 +86,15 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
 }
 
 export async function pollQueuedRunsOnce(): Promise<boolean> {
-  const result = await getPool().query<{ id: string; org_id: string; cloud_account_id: string }>(
-    "SELECT id, org_id, cloud_account_id FROM sync_runs WHERE status='queued' AND job_type='inventory_sync' ORDER BY created_at ASC LIMIT 1",
-  );
-  const row = result.rows[0];
-  if (!row) return false;
-  await processInventorySync({ syncRunId: row.id, orgId: row.org_id, accountId: row.cloud_account_id });
-  return true;
+  const organizations = await getPool().query<{ id: string }>("SELECT id FROM organizations ORDER BY created_at ASC");
+  for (const organization of organizations.rows) {
+    const result = await withOrgTransaction(organization.id, (client) => client.query<{ id: string; org_id: string; cloud_account_id: string }>(
+      "SELECT id, org_id, cloud_account_id FROM sync_runs WHERE status='queued' AND job_type='inventory_sync' ORDER BY created_at ASC LIMIT 1",
+    ));
+    const row = result.rows[0];
+    if (!row) continue;
+    await processInventorySync({ syncRunId: row.id, orgId: row.org_id, accountId: row.cloud_account_id });
+    return true;
+  }
+  return false;
 }
