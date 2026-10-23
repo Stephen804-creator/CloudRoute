@@ -6,7 +6,8 @@ const labels = new Set(["unclassified", "retain", "migrate", "retire", "review"]
 const providers = new Set(["aws", "gcp"]);
 function csvCell(value: unknown): string {
   const text = value === null || value === undefined ? "" : typeof value === "string" ? value : JSON.stringify(value);
-  return '"' + text.replace(/"/g, '""') + '"';
+  const safe = /^[\\s]*[=+\\-@]/.test(text) ? "'" + text : text;
+  return '"' + safe.replace(/"/g, '""') + '"';
 }
 
 export async function registerResourceRoutes(app: FastifyInstance): Promise<void> {
