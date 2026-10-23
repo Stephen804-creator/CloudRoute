@@ -34,7 +34,7 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
         accessKeyId: assumed.Credentials.AccessKeyId,
         secretAccessKey: assumed.Credentials.SecretAccessKey,
         sessionToken: assumed.Credentials.SessionToken,
-        expiration: assumed.Credentials.Expiration,
+        ...(assumed.Credentials.Expiration ? { expiration: assumed.Credentials.Expiration } : {}),
       };
     } finally { sts.destroy(); }
 
