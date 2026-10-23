@@ -36,6 +36,8 @@ export default function SignupPage() {
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary-button auth-submit" disabled={busy}>{busy ? "Creating workspace…" : "Create account"} <span aria-hidden="true">→</span></button>
       </form>
+      <div className="auth-divider"><span>or</span></div>
+      <a className="google-button" href="/v1/auth/google"><span aria-hidden="true">G</span> Continue with Google</a>
       <p className="auth-switch">Already have an account? <a href="/login">Sign in</a></p>
     </section><p className="auth-footnote">No cloud resources are changed by CloudRoute's MVP.</p>
   </main>;
