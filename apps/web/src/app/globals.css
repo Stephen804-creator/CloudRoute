@@ -329,3 +329,10 @@ h2 { margin-bottom: 0; font-size: clamp(28px, 3.2vw, 38px); letter-spacing: -0.0
   .freshness-label { display: none; }
   .pagination-row { padding: 13px 15px; }
 }
+
+.landing-nav { display: inline-flex; align-items: center; gap: 18px; }
+.landing-signin { color: #50636d; font-size: 12px; font-weight: 700; }
+.landing-signin:hover { color: var(--green); }
+.landing-get-started { display: inline-flex; align-items: center; gap: 11px; padding: 10px 13px; border: 1px solid #d6e4dc; border-radius: 7px; background: #fff; color: var(--green-dark); font-size: 11px; font-weight: 700; }
+.landing-get-started:hover { background: #f2faf5; }
+@media (max-width: 600px) { .landing-nav { gap: 8px; } .landing-nav .mode-badge { display: none; } .landing-get-started { padding: 9px 10px; } }
