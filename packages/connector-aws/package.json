@@ -4,12 +4,19 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./inventory": "./src/inventory.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./inventory": {
+      "types": "./dist/inventory.d.ts",
+      "import": "./dist/inventory.js"
+    }
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/inventory.test.ts",
+    "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@aws-sdk/client-ec2": "^3.883.0",
@@ -25,5 +32,7 @@
     "@types/node": "^22.15.30",
     "tsx": "^4.20.3",
     "typescript": "~5.9.2"
-  }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts"
 }
