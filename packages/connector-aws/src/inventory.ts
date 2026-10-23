@@ -11,7 +11,7 @@ export interface AwsInventoryItem {
 }
 export interface AwsInventoryResult { resources: AwsInventoryItem[]; complete: boolean; warnings: string[] }
 
-function tagsToRecord(tags: Array<{ Key?: string; Value?: string }> | undefined): Record<string, string> {
+function tagsToRecord(tags: Array<{ Key?: string | undefined; Value?: string | undefined }> | undefined): Record<string, string> {
   return Object.fromEntries((tags ?? []).filter((tag) => tag.Key).map((tag) => [tag.Key!, tag.Value ?? ""]));
 }
 function arn(accountId: string, region: string, service: string, resource: string): string {
