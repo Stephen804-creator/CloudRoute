@@ -1,8 +1,13 @@
 import { Worker } from "bullmq";
+import { config } from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Redis } from "ioredis";
 import { closePool } from "@cloudroute/db";
 import { pollQueuedRunsOnce, processInventorySync } from "./sync.js";
 import { scheduleHourlyInventoryRunsOnce } from "./scheduler.js";
+
+config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"), override: false });
 
 interface InventoryJob { syncRunId: string; orgId: string; accountId: string }
 
