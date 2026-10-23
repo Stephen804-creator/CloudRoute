@@ -1,7 +1,10 @@
 import { readdir, readFile } from "node:fs/promises";
+import { config } from "dotenv";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getPool, closePool } from "./client.js";
+
+config({ path: join(dirname(fileURLToPath(import.meta.url)), "../../../.env"), override: false });
 
 const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "../migrations");
 
