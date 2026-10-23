@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -9,6 +9,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const errorCode = new URLSearchParams(window.location.search).get("error");
+    if (errorCode === "google-not-configured") setError("Google sign-in is not configured on this deployment yet. Use email and password for now.");
+    else if (errorCode === "google-auth-failed") setError("Google sign-in could not be completed. Please try again.");
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(""); setBusy(true);
@@ -32,6 +38,8 @@ export default function LoginPage() {
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary-button auth-submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"} <span aria-hidden="true">→</span></button>
       </form>
+      <div className="auth-divider"><span>or</span></div>
+      <a className="google-button" href="/v1/auth/google"><span aria-hidden="true">G</span> Continue with Google</a>
       <p className="auth-switch">New to CloudRoute? <a href="/signup">Create an account</a></p>
     </section><p className="auth-footnote">Your cloud credentials are never requested as long-lived AWS access keys.</p>
   </main>;
