@@ -19,7 +19,7 @@ test("unknown API routes return 404", async () => {
 });
 
 test("tenant-scoped endpoints reject requests without a session", async () => {
-  for (const url of ["/v1/accounts", "/v1/resources", "/v1/overview"]) {
+  for (const url of ["/v1/accounts", "/v1/resources", "/v1/overview", "/v1/costs/summary", "/v1/costs/breakdown", "/v1/findings", "/v1/notification-preferences", "/v1/resources/11111111-1111-4111-8111-111111111111/history"]) {
     const response = await app.inject({ method: "GET", url });
     assert.equal(response.statusCode, 401, url + " must require authentication");
   }
