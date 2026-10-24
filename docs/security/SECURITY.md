@@ -10,7 +10,6 @@ CloudRoute is read-only. No MVP endpoint, worker, connector, or UI action may cr
 - AWS access uses a customer-created cross-account role, scoped to read-only actions and protected by an external ID.
 - Google Cloud access uses runtime Application Default Credentials to impersonate a customer-owned service account with short-lived tokens and a read-only scope. Customer private-key JSON files are not accepted.
 - Never log tokens, private keys, authorization headers, or complete credential payloads.
-- Never log tokens, private keys, authorization headers, or complete credential payloads.
 - Secrets belong in environment-specific secret storage, not source control.
 
 ## Tenant isolation
@@ -24,6 +23,13 @@ Every organization-owned record is scoped to an organization. API authorization 
 - Retries must be bounded and use backoff.
 - Provider errors must not leak credentials or sensitive response content.
 - Treat provider payloads as untrusted input.
+
+## Billing and email integrity
+
+- AWS Cost Explorer access is read-only and uses temporary role credentials.
+- Google Cloud billing reads use a configured BigQuery export table and a short-lived read-only impersonated token. Billing export is optional; inventory remains available without it.
+- Cost amounts retain their original provider currency; CloudRoute does not combine different currencies into a misleading total.
+- Email notifications require an explicit outbound provider configuration. When unconfigured, messages remain queued and are not reported as delivered.
 
 ## Reporting integrity
 
