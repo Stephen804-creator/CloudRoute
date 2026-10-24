@@ -2,6 +2,7 @@ import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { fetchAwsInventory } from "@cloudroute/connector-aws/inventory";
 import { GcpInventoryConnector } from "@cloudroute/connector-gcp";
 import { getPool, withOrgTransaction } from "@cloudroute/db";
+import { evaluateIdleFindings } from "./savings.js";
 
 interface SyncJob { syncRunId: string; orgId: string; accountId: string }
 interface NormalizedInventoryItem {
@@ -123,6 +124,7 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
         );
         missing = markedMissing.rowCount ?? 0;
       }
+      if (inventory.complete) await evaluateIdleFindings(client, job.orgId, account.id);
       const status = inventory.complete ? "succeeded" : "partial";
       await client.query(
         "UPDATE sync_runs SET status=$2, finished_at=now(), resources_seen=$3, resources_created=$4, resources_updated=$5, resources_missing=$6, error_code=$7, error_message=$8, is_complete=$9 WHERE id=$1 AND org_id=$10",
