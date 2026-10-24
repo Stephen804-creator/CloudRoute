@@ -4,12 +4,16 @@ import { useEffect, useState, type FormEvent } from "react";
 
 interface Account { id: string; provider: string; displayName: string; accountId: string; roleArn?: string | null; serviceAccountEmail?: string | null; status: string; permissionStatus: string; lastSyncAt: string | null; lastSyncStatus: string | null }
 interface Setup { configured: boolean; principalArn: string | null }
-interface AccountResponse { account: Account; externalId: string; nextStep: string }\ninterface GcpSetupResponse { account: Account; nextStep: string }
+interface AccountResponse { account: Account; externalId: string; nextStep: string }
+interface GcpSetupResponse { account: Account; nextStep: string }
 
 export default function AccountsPage() {
   const [accountId, setAccountId] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [roleArn, setRoleArn] = useState("");\n  const [gcpProjectId, setGcpProjectId] = useState("");\n  const [gcpServiceAccountEmail, setGcpServiceAccountEmail] = useState("");\n  const [gcpSetup, setGcpSetup] = useState<GcpSetupResponse | null>(null);
+  const [roleArn, setRoleArn] = useState("");
+  const [gcpProjectId, setGcpProjectId] = useState("");
+  const [gcpServiceAccountEmail, setGcpServiceAccountEmail] = useState("");
+  const [gcpSetup, setGcpSetup] = useState<GcpSetupResponse | null>(null);
   const [created, setCreated] = useState<AccountResponse | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [setup, setSetup] = useState<Setup>({ configured: false, principalArn: null });
