@@ -4,7 +4,7 @@ import { withOrgTransaction } from "@cloudroute/db";
 import { authenticate } from "../auth/guard.js";
 import { enqueueInventorySync } from "../queue.js";
 
-interface AwsAccountBody { roleArn?: string; accountId: string; displayName?: string }\ninterface GcpAccountBody { projectId: string; serviceAccountEmail: string; displayName?: string }\nconst gcpProjectIdPattern = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;\nconst gcpServiceAccountPattern = /^[^\\s@]+@[^\\s@]+\\.iam\\.gserviceaccount\\.com$/;
+interface AwsAccountBody { roleArn?: string; accountId: string; displayName?: string }\ninterface GcpAccountBody { projectId: string; serviceAccountEmail: string; displayName?: string }\nconst gcpProjectIdPattern = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;\nconst gcpServiceAccountPattern = /^[^\s@]+@[^\s@]+\.iam\.gserviceaccount\.com$/;
 const roleArnPattern = /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_\/-]{1,512}$/;
 
 export async function registerAccountRoutes(app: FastifyInstance): Promise<void> {
