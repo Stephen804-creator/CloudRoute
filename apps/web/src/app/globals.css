@@ -395,3 +395,14 @@ h2 { margin-bottom: 0; font-size: clamp(28px, 3.2vw, 38px); letter-spacing: -0.0
   .finding-bottom { align-items: flex-start; flex-direction: column; }
   .finding-actions { width: 100%; }
 }
+
+.settings-panel { margin-bottom: 18px; }
+.settings-form { display: flex; flex-direction: column; gap: 0; }
+.preference-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.preference-row span { display: flex; flex-direction: column; gap: 5px; }
+.preference-row strong { font-size: 13px; }
+.preference-row small, .settings-updated, .settings-copy { color: var(--muted); font-size: 12px; line-height: 1.8; }
+.preference-row input { width: 18px; height: 18px; accent-color: var(--green); flex: 0 0 auto; }
+.settings-form .primary-button { align-self: flex-start; margin-top: 18px; border: 0; cursor: pointer; }
+.settings-updated { margin: 12px 0 0; }
+.settings-copy { max-width: 780px; }
