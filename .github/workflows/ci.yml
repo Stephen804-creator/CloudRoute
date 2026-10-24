@@ -6,9 +6,11 @@ on:
       - main
       - unit-1-foundation
       - build/units-2-7
+      - build/unit-8-gcp
   pull_request:
     branches:
       - main
+      - build/units-2-7
 
 permissions:
   contents: read
