@@ -31,6 +31,16 @@ export interface GcpConnectorDependencies {
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
+function sanitizeProviderData(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeProviderData);
+  if (value === null || typeof value !== "object") return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (/(environmentvariables?|secret|privatekey|credential|password|accesskey|apikey|authorization|token)/i.test(key)) continue;
+    result[key] = sanitizeProviderData(child);
+  }
+  return result;
+}
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -63,7 +73,7 @@ function mapLabels(data: Record<string, unknown>): Record<string, string> {
 export function normalizeGcpAsset(asset: CloudAsset, projectId: string, observedAt: string = new Date().toISOString()): NormalizedCloudResource | null {
   const name = stringValue(asset.name);
   if (!name) return null;
-  const data = record(asset.resource?.data);
+  const data = record(sanitizeProviderData(asset.resource?.data));
   return {
     provider: "gcp",
     providerAccountId: projectId,
