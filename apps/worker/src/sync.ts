@@ -1,8 +1,63 @@
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { fetchAwsInventory } from "@cloudroute/connector-aws/inventory";
+import { GcpInventoryConnector } from "@cloudroute/connector-gcp";
 import { getPool, withOrgTransaction } from "@cloudroute/db";
 
 interface SyncJob { syncRunId: string; orgId: string; accountId: string }
+interface NormalizedInventoryItem {
+  externalId: string;
+  resourceType: string;
+  displayName: string | null;
+  region: string | null;
+  resourceStatus: string | null;
+  tags: Record<string, string>;
+  metadata: Record<string, unknown>;
+}
+interface InventoryResult { resources: NormalizedInventoryItem[]; complete: boolean; warnings: string[] }
+
+async function fetchGcpInventory(projectId: string, serviceAccountEmail: string): Promise<InventoryResult> {
+  const connector = new GcpInventoryConnector(serviceAccountEmail);
+  const resources: NormalizedInventoryItem[] = [];
+  const warnings: string[] = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+  do {
+    if (pages >= 500) {
+      warnings.push("GCP_INVENTORY_PAGE_LIMIT_REACHED");
+      return { resources, complete: false, warnings };
+    }
+    try {
+      const page = await connector.listResources({ provider: "gcp", accountId: projectId }, pageToken);
+      for (const resource of page.resources) {
+        const payload = resource.rawPayload;
+        const rawLabels = payload.labels;
+        const rawData = payload.data;
+        const tags = rawLabels !== null && typeof rawLabels === "object" && !Array.isArray(rawLabels)
+          ? Object.fromEntries(Object.entries(rawLabels).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+          : {};
+        const metadata = rawData !== null && typeof rawData === "object" && !Array.isArray(rawData)
+          ? rawData as Record<string, unknown> : {};
+        resources.push({
+          externalId: resource.providerResourceId,
+          resourceType: resource.resourceType,
+          displayName: resource.displayName,
+          region: resource.region,
+          resourceStatus: typeof payload.status === "string" ? payload.status : null,
+          tags,
+          metadata: { assetType: payload.assetType ?? null, providerUpdateTime: payload.updateTime ?? null, ...metadata },
+        });
+      }
+      pageToken = page.nextPageToken ?? undefined;
+      pages++;
+    } catch (error) {
+      if (!resources.length) throw error;
+      warnings.push(error instanceof Error && /^[A-Z0-9_:-]{1,80}$/.test(error.message) ? error.message : "GCP_INVENTORY_PAGE_FAILED");
+      return { resources, complete: false, warnings };
+    }
+  } while (pageToken);
+  return { resources, complete: true, warnings };
+}
+
 
 export async function processInventorySync(job: SyncJob): Promise<void> {
   const claimed = await withOrgTransaction(job.orgId, (client) => client.query(
@@ -14,15 +69,19 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
 
   try {
     const accountResult = await withOrgTransaction(job.orgId, (client) => client.query(
-      "SELECT id, provider, external_account_id, role_arn, external_id FROM cloud_accounts " +
+      "SELECT id, provider, external_account_id, role_arn, external_id, gcp_service_account_email FROM cloud_accounts " +
       "WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL",
       [job.accountId, job.orgId],
     ));
-    const account = accountResult.rows[0] as { id: string; provider: string; external_account_id: string; role_arn: string | null; external_id: string | null } | undefined;
+    const account = accountResult.rows[0] as { id: string; provider: string; external_account_id: string; role_arn: string | null; external_id: string | null; gcp_service_account_email: string | null } | undefined;
     if (!account) throw new Error("ACCOUNT_UNAVAILABLE");
-    if (account.provider !== "aws" || !account.role_arn || !account.external_id) throw new Error("PROVIDER_NOT_READY");
-
-    const sts = new STSClient({ region: process.env.AWS_STS_REGION ?? "us-east-1" });
+    let inventory: InventoryResult;
+    if (account.provider === "gcp") {
+      if (!account.gcp_service_account_email) throw new Error("GCP_SERVICE_ACCOUNT_NOT_CONFIGURED");
+      inventory = await fetchGcpInventory(account.external_account_id, account.gcp_service_account_email);
+    } else if (account.provider === "aws") {
+      if (!account.role_arn || !account.external_id) throw new Error("PROVIDER_NOT_READY");
+      const sts = new STSClient({ region: process.env.AWS_STS_REGION ?? "us-east-1" });
     let credentials;
     try {
       const assumed = await sts.send(new AssumeRoleCommand({
@@ -38,7 +97,10 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
       };
     } finally { sts.destroy(); }
 
-    const inventory = await fetchAwsInventory(credentials, account.external_account_id);
+      inventory = await fetchAwsInventory(credentials, account.external_account_id);
+    } else {
+      throw new Error("UNSUPPORTED_PROVIDER");
+    }
     let created = 0;
     let updated = 0;
     let missing = 0;
@@ -47,10 +109,10 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
       for (const item of inventory.resources) {
         const upsert = await client.query(
           "INSERT INTO resources(org_id, cloud_account_id, provider, external_id, resource_type, display_name, region, resource_status, tags, metadata, last_seen_at, deleted_detected_at, connector_version) " +
-          "VALUES ($1,$2,'aws',$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,now(),NULL,'0.2.0') " +
+          "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,now(),NULL,'0.3.0') " +
           "ON CONFLICT (cloud_account_id, external_id) DO UPDATE SET resource_type=EXCLUDED.resource_type, display_name=EXCLUDED.display_name, region=EXCLUDED.region, resource_status=EXCLUDED.resource_status, tags=EXCLUDED.tags, metadata=EXCLUDED.metadata, last_seen_at=now(), deleted_detected_at=NULL, connector_version=EXCLUDED.connector_version, updated_at=now() " +
           "RETURNING (xmax = 0) AS inserted",
-          [job.orgId, account.id, item.externalId, item.resourceType, item.displayName, item.region, item.resourceStatus, JSON.stringify(item.tags), JSON.stringify(item.metadata)],
+          [job.orgId, account.id, account.provider, item.externalId, item.resourceType, item.displayName, item.region, item.resourceStatus, JSON.stringify(item.tags), JSON.stringify(item.metadata)],
         );
         if (upsert.rows[0]?.inserted) created++; else updated++;
       }

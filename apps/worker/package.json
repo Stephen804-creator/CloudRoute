@@ -16,7 +16,8 @@
     "@cloudroute/db": "workspace:*",
     "bullmq": "^5.58.5",
     "ioredis": "^5.7.0",
-    "dotenv": "^16.6.1"
+    "dotenv": "^16.6.1",
+    "@cloudroute/connector-gcp": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

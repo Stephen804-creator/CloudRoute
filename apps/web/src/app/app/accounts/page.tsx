@@ -2,14 +2,18 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-interface Account { id: string; provider: string; displayName: string; accountId: string; roleArn?: string | null; status: string; permissionStatus: string; lastSyncAt: string | null; lastSyncStatus: string | null }
+interface Account { id: string; provider: string; displayName: string; accountId: string; roleArn?: string | null; serviceAccountEmail?: string | null; status: string; permissionStatus: string; lastSyncAt: string | null; lastSyncStatus: string | null }
 interface Setup { configured: boolean; principalArn: string | null }
 interface AccountResponse { account: Account; externalId: string; nextStep: string }
+interface GcpSetupResponse { account: Account; nextStep: string }
 
 export default function AccountsPage() {
   const [accountId, setAccountId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [roleArn, setRoleArn] = useState("");
+  const [gcpProjectId, setGcpProjectId] = useState("");
+  const [gcpServiceAccountEmail, setGcpServiceAccountEmail] = useState("");
+  const [gcpSetup, setGcpSetup] = useState<GcpSetupResponse | null>(null);
   const [created, setCreated] = useState<AccountResponse | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [setup, setSetup] = useState<Setup>({ configured: false, principalArn: null });
@@ -40,6 +44,20 @@ export default function AccountsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "Could not start AWS connection."); }
     finally { setBusy(false); }
   }
+  async function createGcpAccount(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError(""); setNotice("");
+    try {
+      const data = await api("/v1/accounts/gcp", "POST", {
+        projectId: gcpProjectId.trim(),
+        serviceAccountEmail: gcpServiceAccountEmail.trim(),
+      });
+      setGcpSetup(data);
+      setNotice(data.nextStep);
+      await refresh();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not start Google Cloud connection."); }
+    finally { setBusy(false); }
+  }
+
   async function saveRole(event: FormEvent) {
     event.preventDefault(); if (!created) return;
     setBusy(true); setError(""); setNotice("");
@@ -108,12 +126,22 @@ export default function AccountsPage() {
           <div className="step-row"><span className="step-number">4</span><div><h3>Validate and sync</h3><p>CloudRoute checks STS role assumption before scheduling the first inventory scan.</p><button className="primary-button" disabled={busy || !setup.configured || !roleArn.trim()} onClick={() => void validate(created.account.id)}>Validate connection <span aria-hidden="true">→</span></button><button className="text-button" type="button" onClick={() => { setCreated(null); setAccountId(""); setDisplayName(""); }}>Cancel setup</button></div></div>
         </div>}
       </section>
+      <section className="content-panel connection-panel"><div className="panel-heading"><div><h2>Connect Google Cloud</h2><p>Use service-account impersonation. Do not upload service-account keys.</p></div><span className="provider-icon gcp">G</span></div>
+        {!gcpSetup ? <form className="auth-form connection-form" onSubmit={createGcpAccount}>
+          <label>Google Cloud project ID<input required minLength={6} maxLength={30} pattern="[a-z][a-z0-9-]{4,28}[a-z0-9]" value={gcpProjectId} onChange={(event) => setGcpProjectId(event.target.value)} placeholder="my-production-project" /></label>
+          <label>Read-only service-account email<input required type="email" pattern="[^\s@]+@[^\s@]+\.iam\.gserviceaccount\\.com" value={gcpServiceAccountEmail} onChange={(event) => setGcpServiceAccountEmail(event.target.value)} placeholder="cloudroute-reader@project.iam.gserviceaccount.com" /></label>
+          <button className="primary-button auth-submit" disabled={busy}>{busy ? "Preparing…" : "Start Google Cloud connection"} <span aria-hidden="true">→</span></button>
+        </form> : <div className="setup-steps">
+          <div className="step-row"><span className="step-number">1</span><div><h3>Configure Google Cloud permissions</h3><p>Enable the Cloud Asset API in the target project. Grant the target service account <code>roles/cloudasset.viewer</code> on that project. Grant the CloudRoute runtime identity <code>roles/iam.serviceAccountTokenCreator</code> on this service account. No service-account key is uploaded or stored.</p><p className="field-help">Project: <code>{gcpSetup.account.accountId}</code><br />Service account: <code>{gcpSetup.account.serviceAccountEmail}</code></p><p className="field-help"><a href="https://cloud.google.com/asset-inventory/docs" target="_blank" rel="noreferrer">Cloud Asset Inventory documentation</a></p></div></div>
+          <div className="step-row"><span className="step-number">2</span><div><h3>Validate and sync</h3><p>CloudRoute requests a short-lived impersonated access token and makes read-only inventory requests.</p><button className="primary-button" disabled={busy} onClick={() => void validate(gcpSetup.account.id)}>Validate Google Cloud connection <span aria-hidden="true">→</span></button><button className="text-button" type="button" onClick={() => setGcpSetup(null)}>Close setup</button></div></div>
+        </div>}
+      </section>
       <aside className="content-panel permission-panel"><p className="eyebrow">PERMISSION PROMISE</p><h2>Observe, never operate.</h2><p>CloudRoute's MVP reads resource metadata only. It does not create, modify, or delete resources.</p><ul><li>Cross-account IAM role with an external ID</li><li>Temporary STS credentials only</li><li>No long-lived AWS keys accepted</li><li>No bucket contents, database contents, disk contents, or Lambda environment values collected</li><li>Partial syncs never mark resources deleted</li></ul><a className="text-link" href="https://github.com/Stephen804-creator/CloudRoute/blob/main/docs/security/SECURITY.md" target="_blank" rel="noreferrer">Read security baseline →</a></aside>
     </div>
 
     <section className="content-panel accounts-table-panel"><div className="panel-heading"><div><h2>Connected accounts</h2><p>Current state, permission validation, and sync status.</p></div><span className="count-chip">{accounts.length}</span></div>
-      {!accounts.length ? <p className="empty-copy">No cloud accounts connected yet. Your workspace remains empty until a real provider connection is validated.</p> : <div className="account-list">{accounts.map((account) => <div className="account-row account-manage-row" key={account.id}><span className={"provider-icon " + account.provider}>{account.provider === "aws" ? "A" : "G"}</span><div className="account-main"><strong>{account.displayName}</strong><small>{account.provider.toUpperCase()} · {account.accountId} · Permission: {account.permissionStatus.replaceAll("_", " ")}</small><small>{account.lastSyncAt ? "Last sync " + new Date(account.lastSyncAt).toLocaleString() : "Inventory has not synced yet"}</small></div><span className={"status-pill " + account.status}>{account.status}</span><div className="account-actions">{account.provider === "aws" && account.permissionStatus !== "valid" && <button className="secondary-button" disabled={busy} onClick={() => void resumeSetup(account.id)}>Continue setup</button>}<button className="secondary-button" disabled={busy || account.provider !== "aws"} onClick={() => void validate(account.id)}>Validate / sync</button><button className="text-button danger-text" onClick={() => void disconnect(account.id)}>Disconnect</button></div></div>)}</div>}
+      {!accounts.length ? <p className="empty-copy">No cloud accounts connected yet. Your workspace remains empty until a real provider connection is validated.</p> : <div className="account-list">{accounts.map((account) => <div className="account-row account-manage-row" key={account.id}><span className={"provider-icon " + account.provider}>{account.provider === "aws" ? "A" : "G"}</span><div className="account-main"><strong>{account.displayName}</strong><small>{account.provider.toUpperCase()} · {account.accountId} · Permission: {account.permissionStatus.replaceAll("_", " ")}</small><small>{account.lastSyncAt ? "Last sync " + new Date(account.lastSyncAt).toLocaleString() : "Inventory has not synced yet"}</small></div><span className={"status-pill " + account.status}>{account.status}</span><div className="account-actions">{account.provider === "aws" && account.permissionStatus !== "valid" && <button className="secondary-button" disabled={busy} onClick={() => void resumeSetup(account.id)}>Continue setup</button>}<button className="secondary-button" disabled={busy} onClick={() => void validate(account.id)}>Validate / sync</button><button className="text-button danger-text" onClick={() => void disconnect(account.id)}>Disconnect</button></div></div>)}</div>}
     </section>
-    <p className="data-footnote">Google Cloud connection is not implemented in Units 2–7 yet. No provider data is simulated on this page.</p>
+    <p className="data-footnote">Google Cloud access uses short-lived service-account impersonation. No service-account key files are accepted.</p>
   </div>;
 }
