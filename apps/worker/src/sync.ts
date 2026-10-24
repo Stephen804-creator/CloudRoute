@@ -4,6 +4,7 @@ import { GcpInventoryConnector } from "@cloudroute/connector-gcp";
 import { getPool, withOrgTransaction } from "@cloudroute/db";
 import { evaluateIdleFindings } from "./savings.js";
 import { processCostSync } from "./cost-sync.js";
+import { queueConnectionFailure } from "./notifications.js";
 
 interface SyncJob { syncRunId: string; orgId: string; accountId: string }
 interface NormalizedInventoryItem {
@@ -148,6 +149,7 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
         [job.accountId, job.orgId, code],
       );
     });
+    await queueConnectionFailure(job.orgId, job.accountId, code).catch(() => undefined);
     throw error;
   }
 }
