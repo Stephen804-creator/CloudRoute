@@ -110,7 +110,7 @@ export class GcpInventoryConnector implements ReadOnlyCloudConnector {
       if (!token) throw new Error("GCP_ACCESS_TOKEN_UNAVAILABLE");
       return token;
     }
-    const sourceAuth = new GoogleAuth({ scopes: [CLOUD_PLATFORM_READ_SCOPE] });
+    const sourceAuth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
     const sourceClient = await sourceAuth.getClient();
     const impersonated = new Impersonated({
       sourceClient,
