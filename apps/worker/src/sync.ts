@@ -69,15 +69,19 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
 
   try {
     const accountResult = await withOrgTransaction(job.orgId, (client) => client.query(
-      "SELECT id, provider, external_account_id, role_arn, external_id FROM cloud_accounts " +
+      "SELECT id, provider, external_account_id, role_arn, external_id, gcp_service_account_email FROM cloud_accounts " +
       "WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL",
       [job.accountId, job.orgId],
     ));
-    const account = accountResult.rows[0] as { id: string; provider: string; external_account_id: string; role_arn: string | null; external_id: string | null } | undefined;
+    const account = accountResult.rows[0] as { id: string; provider: string; external_account_id: string; role_arn: string | null; external_id: string | null; gcp_service_account_email: string | null } | undefined;
     if (!account) throw new Error("ACCOUNT_UNAVAILABLE");
-    if (account.provider !== "aws" || !account.role_arn || !account.external_id) throw new Error("PROVIDER_NOT_READY");
-
-    const sts = new STSClient({ region: process.env.AWS_STS_REGION ?? "us-east-1" });
+    let inventory: InventoryResult;
+    if (account.provider === "gcp") {
+      if (!account.gcp_service_account_email) throw new Error("GCP_SERVICE_ACCOUNT_NOT_CONFIGURED");
+      inventory = await fetchGcpInventory(account.external_account_id, account.gcp_service_account_email);
+    } else if (account.provider === "aws") {
+      if (!account.role_arn || !account.external_id) throw new Error("PROVIDER_NOT_READY");
+      const sts = new STSClient({ region: process.env.AWS_STS_REGION ?? "us-east-1" });
     let credentials;
     try {
       const assumed = await sts.send(new AssumeRoleCommand({
@@ -93,7 +97,10 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
       };
     } finally { sts.destroy(); }
 
-    const inventory = await fetchAwsInventory(credentials, account.external_account_id);
+      inventory = await fetchAwsInventory(credentials, account.external_account_id);
+    } else {
+      throw new Error("UNSUPPORTED_PROVIDER");
+    }
     let created = 0;
     let updated = 0;
     let missing = 0;
