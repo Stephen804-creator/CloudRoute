@@ -6,6 +6,9 @@ import cookie from "@fastify/cookie";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAccountRoutes } from "./routes/accounts.js";
 import { registerResourceRoutes } from "./routes/resources.js";
+import { registerCostRoutes } from "./routes/costs.js";
+import { registerFindingRoutes } from "./routes/findings.js";
+import { registerResourceHistoryRoutes } from "./routes/resource-history.js";
 import type { AuthContext } from "./auth/session.js";
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"), override: false });
@@ -34,6 +37,9 @@ app.get("/health", async () => ({ status: "ok", service: "cloudroute-api", mode:
 await registerAuthRoutes(app);
 await registerAccountRoutes(app);
 await registerResourceRoutes(app);
+await registerResourceHistoryRoutes(app);
+await registerCostRoutes(app);
+await registerFindingRoutes(app);
 
 const port = Number.parseInt(process.env.PORT ?? "4000", 10);
 const host = process.env.HOST ?? "127.0.0.1";
