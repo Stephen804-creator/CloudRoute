@@ -13,7 +13,9 @@
         "s3:ListAllMyBuckets",
         "rds:DescribeDBInstances",
         "lambda:ListFunctions",
-        "elasticloadbalancing:DescribeLoadBalancers"
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "ce:GetCostAndUsage",
+        "ce:GetDimensionValues"
       ],
       "Resource": "*"
     }
