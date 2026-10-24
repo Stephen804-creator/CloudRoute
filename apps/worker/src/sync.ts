@@ -109,10 +109,10 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
       for (const item of inventory.resources) {
         const upsert = await client.query(
           "INSERT INTO resources(org_id, cloud_account_id, provider, external_id, resource_type, display_name, region, resource_status, tags, metadata, last_seen_at, deleted_detected_at, connector_version) " +
-          "VALUES ($1,$2,'aws',$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,now(),NULL,'0.2.0') " +
+          "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,now(),NULL,'0.3.0') " +
           "ON CONFLICT (cloud_account_id, external_id) DO UPDATE SET resource_type=EXCLUDED.resource_type, display_name=EXCLUDED.display_name, region=EXCLUDED.region, resource_status=EXCLUDED.resource_status, tags=EXCLUDED.tags, metadata=EXCLUDED.metadata, last_seen_at=now(), deleted_detected_at=NULL, connector_version=EXCLUDED.connector_version, updated_at=now() " +
           "RETURNING (xmax = 0) AS inserted",
-          [job.orgId, account.id, item.externalId, item.resourceType, item.displayName, item.region, item.resourceStatus, JSON.stringify(item.tags), JSON.stringify(item.metadata)],
+          [job.orgId, account.id, account.provider, item.externalId, item.resourceType, item.displayName, item.region, item.resourceStatus, JSON.stringify(item.tags), JSON.stringify(item.metadata)],
         );
         if (upsert.rows[0]?.inserted) created++; else updated++;
       }
