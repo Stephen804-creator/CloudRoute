@@ -37,6 +37,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const nav = [
     { href: "/app", label: "Overview", icon: "◫" },
     { href: "/app/inventory", label: "Inventory", icon: "▦" },
+    { href: "/app/costs", label: "Cost explorer", icon: "$" },
+    { href: "/app/savings", label: "Savings findings", icon: "↘" },
+    { href: "/app/settings", label: "Settings", icon: "⚙" },
     { href: "/app/accounts", label: "Cloud accounts", icon: "⌘" },
   ];
 

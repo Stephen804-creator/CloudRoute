@@ -6,6 +6,8 @@ import { Redis } from "ioredis";
 import { closePool } from "@cloudroute/db";
 import { pollQueuedRunsOnce, processInventorySync } from "./sync.js";
 import { scheduleHourlyInventoryRunsOnce } from "./scheduler.js";
+import { scheduleCostSyncRunsOnce } from "./cost-sync.js";
+import { deliverQueuedEmailsOnce, queueWeeklyDigestsOnce } from "./notifications.js";
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"), override: false });
 
@@ -13,8 +15,12 @@ interface InventoryJob { syncRunId: string; orgId: string; accountId: string }
 
 async function main(): Promise<void> {
   await scheduleHourlyInventoryRunsOnce();
+  await scheduleCostSyncRunsOnce();
+  await queueWeeklyDigestsOnce();
   const scheduler = setInterval(() => {
     void scheduleHourlyInventoryRunsOnce().catch((error) => console.error("Inventory scheduling failed", { message: error instanceof Error ? error.message : "unknown" }));
+    void scheduleCostSyncRunsOnce().catch((error) => console.error("Cost scheduling failed", { message: error instanceof Error ? error.message : "unknown" }));
+    void queueWeeklyDigestsOnce().catch((error) => console.error("Digest scheduling failed", { message: error instanceof Error ? error.message : "unknown" }));
   }, 60_000);
   const redisUrl = process.env.REDIS_URL;
   if (redisUrl) {
@@ -39,8 +45,9 @@ async function main(): Promise<void> {
     // Also poll durable PostgreSQL queued runs so a transient Redis enqueue failure is recoverable.
     while (!stopping) {
       try {
+        const sent = await deliverQueuedEmailsOnce();
         const found = await pollQueuedRunsOnce();
-        if (!found) await new Promise((resolve) => setTimeout(resolve, 5000));
+        if (!found && !sent) await new Promise((resolve) => setTimeout(resolve, 5000));
       } catch (error) {
         console.error("Fallback queue polling failed", { message: error instanceof Error ? error.message : "unknown" });
         await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -56,8 +63,9 @@ async function main(): Promise<void> {
   process.once("SIGTERM", () => void shutdown());
   while (!stopping) {
     try {
+      const sent = await deliverQueuedEmailsOnce();
       const found = await pollQueuedRunsOnce();
-      if (!found) await new Promise((resolve) => setTimeout(resolve, 5000));
+      if (!found && !sent) await new Promise((resolve) => setTimeout(resolve, 5000));
     } catch (error) {
       console.error("Queue polling failed", { message: error instanceof Error ? error.message : "unknown" });
       await new Promise((resolve) => setTimeout(resolve, 5000));

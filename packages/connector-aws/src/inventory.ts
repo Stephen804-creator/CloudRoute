@@ -54,7 +54,7 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
           externalId: arn(accountId, region, "ec2", "instance/" + instance.InstanceId),
           resourceType: "compute_instance", displayName: instance.Tags?.find((tag) => tag.Key === "Name")?.Value ?? instance.InstanceId,
           region, resourceStatus: instance.State?.Name ?? null, tags: tagsToRecord(instance.Tags),
-          metadata: { instanceType: instance.InstanceType ?? null, launchTime: instance.LaunchTime?.toISOString() ?? null, platform: instance.PlatformDetails ?? instance.Platform ?? null, availabilityZone: instance.Placement?.AvailabilityZone ?? null, vpcId: instance.VpcId ?? null, subnetId: instance.SubnetId ?? null },
+          metadata: { instanceType: instance.InstanceType ?? null, launchTime: instance.LaunchTime?.toISOString() ?? null, platform: instance.PlatformDetails ?? instance.Platform ?? null, availabilityZone: instance.Placement?.AvailabilityZone ?? null, vpcId: instance.VpcId ?? null, subnetId: instance.SubnetId ?? null, attachedVolumeIds: (instance.BlockDeviceMappings ?? []).map((mapping) => mapping.Ebs?.VolumeId).filter((id): id is string => Boolean(id)) },
         });
         token = result.NextToken;
       } while (token);
@@ -67,7 +67,7 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
           externalId: arn(accountId, region, "ec2", "volume/" + volume.VolumeId), resourceType: "block_volume",
           displayName: volume.Tags?.find((tag) => tag.Key === "Name")?.Value ?? volume.VolumeId, region,
           resourceStatus: volume.State ?? null, tags: tagsToRecord(volume.Tags),
-          metadata: { sizeGiB: volume.Size ?? null, volumeType: volume.VolumeType ?? null, encrypted: volume.Encrypted ?? null, attached: Boolean(volume.Attachments?.length) },
+          metadata: { sizeGiB: volume.Size ?? null, volumeType: volume.VolumeType ?? null, encrypted: volume.Encrypted ?? null, attached: Boolean(volume.Attachments?.length), createTime: volume.CreateTime?.toISOString() ?? null },
         });
         token = result.NextToken;
       } while (token);
@@ -89,7 +89,7 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
           externalId: arn(accountId, region, "ec2", "snapshot/" + snapshot.SnapshotId), resourceType: "snapshot",
           displayName: snapshot.Tags?.find((tag) => tag.Key === "Name")?.Value ?? snapshot.SnapshotId, region,
           resourceStatus: snapshot.State ?? null, tags: tagsToRecord(snapshot.Tags),
-          metadata: { volumeSizeGiB: snapshot.VolumeSize ?? null, encrypted: snapshot.Encrypted ?? null, startTime: snapshot.StartTime?.toISOString() ?? null },
+          metadata: { volumeSizeGiB: snapshot.VolumeSize ?? null, encrypted: snapshot.Encrypted ?? null, startTime: snapshot.StartTime?.toISOString() ?? null, sourceVolumeId: snapshot.VolumeId ?? null },
         });
         token = result.NextToken;
       } while (token);

@@ -8,6 +8,8 @@ interface Resource {
   accountName: string; accountId: string;
 }
 interface InventoryResponse { resources: Resource[]; page: { limit: number; hasMore: boolean; nextCursor: string | null } }
+interface ResourceDetail { resource: Record<string, unknown> }
+interface HistoryResponse { history: Array<{ id: string; changeType: string; changedFields: string[]; snapshot: Record<string, unknown>; observedAt: string }> }
 const labels = ["unclassified", "retain", "migrate", "retire", "review"];
 const pretty = (value: string | null) => value ? value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "—";
 
@@ -22,6 +24,10 @@ export default function InventoryPage() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [history, setHistory] = useState<HistoryResponse["history"]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = useCallback(async (nextCursor?: string | null) => {
     setLoading(true); setError("");
@@ -44,6 +50,24 @@ export default function InventoryPage() {
   }, [provider, type, region, migrationLabel, search]);
 
   useEffect(() => { void load(null); }, [load]);
+
+  async function openDetails(item: Resource) {
+    if (selectedId === item.id) { setSelectedId(""); setDetail(null); setHistory([]); return; }
+    setSelectedId(item.id); setDetail(null); setHistory([]); setDetailLoading(true); setError("");
+    try {
+      const [resourceResponse, historyResponse] = await Promise.all([
+        fetch("/v1/resources/" + item.id, { credentials: "include", cache: "no-store" }),
+        fetch("/v1/resources/" + item.id + "/history", { credentials: "include", cache: "no-store" }),
+      ]);
+      const resourceBody = await resourceResponse.json();
+      const historyBody = await historyResponse.json();
+      if (!resourceResponse.ok) throw new Error(resourceBody.error?.message ?? "Could not load resource details.");
+      if (!historyResponse.ok) throw new Error(historyBody.error?.message ?? "Could not load resource history.");
+      setDetail((resourceBody as ResourceDetail).resource);
+      setHistory((historyBody as HistoryResponse).history);
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load resource details."); }
+    finally { setDetailLoading(false); }
+  }
 
   async function updateLabel(id: string, label: string) {
     setError("");
@@ -73,7 +97,11 @@ export default function InventoryPage() {
     {error && <div className="inline-alert" role="alert">{error}</div>}
     <section className="content-panel inventory-panel">
       <div className="panel-heading"><div><h2>Resources <span className="count-chip">{items.length}{hasMore ? "+" : ""}</span></h2><p>Metadata only. Resource state may be stale; check last-seen timestamps.</p></div><span className="freshness-label"><span /> Freshness visible</span></div>
-      {loading && !items.length ? <p className="empty-copy">Loading resources…</p> : !items.length ? <div className="empty-state compact-empty"><span className="empty-symbol">▦</span><h3>No resources to show yet.</h3><p>Connect and validate an AWS account, then wait for its first inventory sync. Filters may also be hiding results.</p><a className="text-link" href="/app/accounts">Manage cloud accounts →</a></div> : <div className="table-scroll"><table className="inventory-table"><thead><tr><th>Resource</th><th>Provider</th><th>Region</th><th>Status</th><th>Migration label</th><th>Last seen</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.displayName || item.externalId}</strong><small>{pretty(item.resourceType)} · {item.accountName}</small><code>{item.externalId}</code></td><td><span className={"provider-badge " + item.provider}>{item.provider.toUpperCase()}</span></td><td>{item.region || "Global"}</td><td><span className="table-status">{pretty(item.status)}</span></td><td><select aria-label={"Migration label for " + (item.displayName || item.externalId)} className="label-select" value={item.migrationLabel} onChange={(event) => void updateLabel(item.id, event.target.value)}>{labels.map((value) => <option key={value} value={value}>{pretty(value)}</option>)}</select></td><td>{new Date(item.lastSeenAt).toLocaleString()}</td></tr>)}</tbody></table></div>}
+      {loading && !items.length ? <p className="empty-copy">Loading resources…</p> : !items.length ? <div className="empty-state compact-empty"><span className="empty-symbol">▦</span><h3>No resources to show yet.</h3><p>Connect and validate an AWS account, then wait for its first inventory sync. Filters may also be hiding results.</p><a className="text-link" href="/app/accounts">Manage cloud accounts →</a></div> : <div className="table-scroll"><table className="inventory-table"><thead><tr><th>Resource</th><th>Provider</th><th>Region</th><th>Status</th><th>Migration label</th><th>Last seen</th><th>Details</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><strong>{item.displayName || item.externalId}</strong><small>{pretty(item.resourceType)} · {item.accountName}</small><code>{item.externalId}</code></td><td><span className={"provider-badge " + item.provider}>{item.provider.toUpperCase()}</span></td><td>{item.region || "Global"}</td><td><span className="table-status">{pretty(item.status)}</span></td><td><select aria-label={"Migration label for " + (item.displayName || item.externalId)} className="label-select" value={item.migrationLabel} onChange={(event) => void updateLabel(item.id, event.target.value)}>{labels.map((value) => <option key={value} value={value}>{pretty(value)}</option>)}</select></td><td>{new Date(item.lastSeenAt).toLocaleString()}</td><td><button type="button" className="secondary-button details-button" aria-expanded={selectedId === item.id} onClick={() => void openDetails(item)}>{selectedId === item.id ? "Close" : "Details"}</button></td></tr>)}</tbody></table></div>}
+      {selectedId && <section className="resource-detail-panel" aria-live="polite">
+        <div className="panel-heading"><div><h2>Resource details</h2><p>Provider metadata and recorded state changes.</p></div><button type="button" className="secondary-button" onClick={() => { setSelectedId(""); setDetail(null); setHistory([]); }}>Close</button></div>
+        {detailLoading ? <p className="empty-copy">Loading details and history…</p> : detail && <><h3>Normalized record</h3><pre className="detail-json">{JSON.stringify({ id: detail.id, provider: detail.provider, external_id: detail.external_id, resource_type: detail.resource_type, display_name: detail.display_name, region: detail.region, resource_status: detail.resource_status, tags: detail.tags, metadata: detail.metadata, migration_label: detail.migration_label, first_seen_at: detail.first_seen_at, last_seen_at: detail.last_seen_at }, null, 2)}</pre><h3>Change history</h3>{!history.length ? <p className="empty-copy">No meaningful changes recorded yet.</p> : <div className="history-list">{history.map((entry) => <div className="history-row" key={entry.id}><span className="status-pill">{pretty(entry.changeType)}</span><div><strong>{entry.changedFields.map(pretty).join(", ")}</strong><small>{new Date(entry.observedAt).toLocaleString()}</small></div><details><summary>Snapshot</summary><pre className="detail-json">{JSON.stringify(entry.snapshot, null, 2)}</pre></details></div>)}</div>}</>}
+      </section>}
       {hasMore && <div className="pagination-row"><span>Showing {items.length} resources</span><button className="secondary-button" disabled={loading || !cursor} onClick={() => void load(cursor)}>Load more <span aria-hidden="true">↓</span></button></div>}
     </section>
     <p className="data-footnote">Migration labels classify your plan; they do not perform cloud actions. CloudRoute MVP cannot provision, modify, or delete cloud resources.</p>

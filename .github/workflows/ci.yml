@@ -7,10 +7,12 @@ on:
       - unit-1-foundation
       - build/units-2-7
       - build/unit-8-gcp
+      - build/units-9-12
   pull_request:
     branches:
       - main
       - build/units-2-7
+      - build/unit-8-gcp
 
 permissions:
   contents: read

@@ -13,6 +13,9 @@ export default function AccountsPage() {
   const [roleArn, setRoleArn] = useState("");
   const [gcpProjectId, setGcpProjectId] = useState("");
   const [gcpServiceAccountEmail, setGcpServiceAccountEmail] = useState("");
+  const [gcpBillingProjectId, setGcpBillingProjectId] = useState("");
+  const [gcpBillingDataset, setGcpBillingDataset] = useState("");
+  const [gcpBillingTable, setGcpBillingTable] = useState("");
   const [gcpSetup, setGcpSetup] = useState<GcpSetupResponse | null>(null);
   const [created, setCreated] = useState<AccountResponse | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -50,6 +53,7 @@ export default function AccountsPage() {
       const data = await api("/v1/accounts/gcp", "POST", {
         projectId: gcpProjectId.trim(),
         serviceAccountEmail: gcpServiceAccountEmail.trim(),
+        ...(gcpBillingProjectId.trim() || gcpBillingDataset.trim() || gcpBillingTable.trim() ? { billingProjectId: gcpBillingProjectId.trim(), billingDataset: gcpBillingDataset.trim(), billingTable: gcpBillingTable.trim() } : {}),
       });
       setGcpSetup(data);
       setNotice(data.nextStep);
@@ -129,7 +133,12 @@ export default function AccountsPage() {
       <section className="content-panel connection-panel"><div className="panel-heading"><div><h2>Connect Google Cloud</h2><p>Use service-account impersonation. Do not upload service-account keys.</p></div><span className="provider-icon gcp">G</span></div>
         {!gcpSetup ? <form className="auth-form connection-form" onSubmit={createGcpAccount}>
           <label>Google Cloud project ID<input required minLength={6} maxLength={30} pattern="[a-z][a-z0-9-]{4,28}[a-z0-9]" value={gcpProjectId} onChange={(event) => setGcpProjectId(event.target.value)} placeholder="my-production-project" /></label>
-          <label>Read-only service-account email<input required type="email" pattern="[^\s@]+@[^\s@]+\.iam\.gserviceaccount\\.com" value={gcpServiceAccountEmail} onChange={(event) => setGcpServiceAccountEmail(event.target.value)} placeholder="cloudroute-reader@project.iam.gserviceaccount.com" /></label>
+          <label>Read-only service-account email<input required type="email" pattern="[^\s@]+@[^\s@]+\.iam\.gserviceaccount\.com" value={gcpServiceAccountEmail} onChange={(event) => setGcpServiceAccountEmail(event.target.value)} placeholder="cloudroute-reader@project.iam.gserviceaccount.com" /></label>
+          <div className="billing-config"><p className="eyebrow">OPTIONAL COST REPORTING</p><p className="field-help">For Google Cloud cost reporting, enable Cloud Billing export to BigQuery and enter its location. Leave all three fields blank to connect inventory only.</p>
+            <label>Billing export project ID<input value={gcpBillingProjectId} onChange={(event) => setGcpBillingProjectId(event.target.value)} pattern="[a-z][a-z0-9-]{4,28}[a-z0-9]" placeholder="billing-export-project" /></label>
+            <label>BigQuery dataset ID<input value={gcpBillingDataset} onChange={(event) => setGcpBillingDataset(event.target.value)} pattern="[A-Za-z0-9_-]{1,1024}" placeholder="billing_export" /></label>
+            <label>BigQuery table ID<input value={gcpBillingTable} onChange={(event) => setGcpBillingTable(event.target.value)} pattern="[A-Za-z0-9_-]{1,1024}" placeholder="gcp_billing_export_v1_XXXXXX" /></label>
+          </div>
           <button className="primary-button auth-submit" disabled={busy}>{busy ? "Preparing…" : "Start Google Cloud connection"} <span aria-hidden="true">→</span></button>
         </form> : <div className="setup-steps">
           <div className="step-row"><span className="step-number">1</span><div><h3>Configure Google Cloud permissions</h3><p>Enable the Cloud Asset API in the target project. Grant the target service account <code>roles/cloudasset.viewer</code> on that project. Grant the CloudRoute runtime identity <code>roles/iam.serviceAccountTokenCreator</code> on this service account. No service-account key is uploaded or stored.</p><p className="field-help">Project: <code>{gcpSetup.account.accountId}</code><br />Service account: <code>{gcpSetup.account.serviceAccountEmail}</code></p><p className="field-help"><a href="https://cloud.google.com/asset-inventory/docs" target="_blank" rel="noreferrer">Cloud Asset Inventory documentation</a></p></div></div>
