@@ -53,7 +53,7 @@ export default function AccountsPage() {
       const data = await api("/v1/accounts/gcp", "POST", {
         projectId: gcpProjectId.trim(),
         serviceAccountEmail: gcpServiceAccountEmail.trim(),
-        ...(gcpBillingProjectId.trim() && gcpBillingDataset.trim() && gcpBillingTable.trim() ? { billingProjectId: gcpBillingProjectId.trim(), billingDataset: gcpBillingDataset.trim(), billingTable: gcpBillingTable.trim() } : {}),
+        ...(gcpBillingProjectId.trim() || gcpBillingDataset.trim() || gcpBillingTable.trim() ? { billingProjectId: gcpBillingProjectId.trim(), billingDataset: gcpBillingDataset.trim(), billingTable: gcpBillingTable.trim() } : {}),
       });
       setGcpSetup(data);
       setNotice(data.nextStep);
