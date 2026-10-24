@@ -18,11 +18,13 @@
     "ioredis": "^5.7.0",
     "dotenv": "^16.6.1",
     "@cloudroute/connector-gcp": "workspace:*",
-    "@aws-sdk/client-cost-explorer": "^3.883.0"
+    "@aws-sdk/client-cost-explorer": "^3.883.0",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
     "tsx": "^4.20.3",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "@types/pg": "^8.15.5"
   }
 }
