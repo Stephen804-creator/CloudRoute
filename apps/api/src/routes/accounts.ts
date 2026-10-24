@@ -21,7 +21,7 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
     if (!request.authContext) return;
     const result = await withOrgTransaction(request.authContext.orgId, (client) => client.query(
       "SELECT id, provider, display_name AS \"displayName\", external_account_id AS \"accountId\", status, " +
-      "permission_status AS \"permissionStatus\", last_sync_at AS \"lastSyncAt\", last_sync_status AS \"lastSyncStatus\", created_at AS \"createdAt\" " +
+      "permission_status AS \"permissionStatus\", gcp_service_account_email AS \"serviceAccountEmail\", last_sync_at AS \"lastSyncAt\", last_sync_status AS \"lastSyncStatus\", created_at AS \"createdAt\" " +
       "FROM cloud_accounts WHERE org_id=$1 AND disconnected_at IS NULL ORDER BY created_at DESC",
       [request.authContext!.orgId],
     ));
