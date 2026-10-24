@@ -59,23 +59,23 @@ export function buildIdleCandidates(resources: ResourceRow[], now = new Date()):
   for (const resource of resources) {
     const metadata = resource.metadata ?? {};
     if (resource.resource_type === "compute_instance" && /stopped|terminated/i.test(resource.resource_status ?? "") &&
-        isOlderThan(metadata.launchTime ?? metadata.createTime ?? metadata.creationTimestamp, 7, now)) {
+        isOlderThan(metadata.stoppedAt ?? metadata.lastStoppedAt, 7, now)) {
       const ids = attachedVolumeIds(resource);
       const hasExistingVolume = ids.some((id) => volumes.has(id) || [...volumes].some((volume) => volume.endsWith("/" + id) || volume.endsWith(":" + id)));
       if (hasExistingVolume) candidates.push({
         resource, ruleKey: "stopped_instance_with_billable_disk", severity: "medium",
         title: "Stopped instance may still incur storage charges",
         description: "This instance has been stopped for at least seven days and its inventory metadata references a disk that still exists.",
-        evidence: { status: resource.resource_status, launchTime: metadata.launchTime ?? metadata.createTime ?? metadata.creationTimestamp, attachedVolumeIds: ids, windowDays: 7 },
+        evidence: { status: resource.resource_status, stoppedAt: metadata.stoppedAt ?? metadata.lastStoppedAt, attachedVolumeIds: ids, windowDays: 7 },
       });
     }
     if (resource.resource_type === "block_volume" && isVolumeAttached(resource) === false &&
-        isOlderThan(metadata.createTime ?? metadata.creationTimestamp ?? metadata.creationTime, 7, now)) {
+        isOlderThan(metadata.unattachedSince ?? metadata.detachedAt, 7, now)) {
       candidates.push({
         resource, ruleKey: "unattached_volume", severity: "medium",
         title: "Unattached block volume",
         description: "Provider metadata reports that this volume is not attached. Verify that it is no longer needed before removing it.",
-        evidence: { attached: false, sizeGiB: metadata.sizeGiB ?? metadata.sizeGb ?? metadata.sizeGb, windowDays: 7 },
+        evidence: { attached: false, unattachedSince: metadata.unattachedSince ?? metadata.detachedAt, sizeGiB: metadata.sizeGiB ?? metadata.sizeGb ?? null, windowDays: 7 },
       });
     }
     if (resource.resource_type === "static_ip" && isAddressAssociated(resource) === false) {
