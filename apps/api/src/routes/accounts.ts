@@ -5,7 +5,7 @@ import { authenticate } from "../auth/guard.js";
 import { enqueueInventorySync } from "../queue.js";
 
 interface AwsAccountBody { roleArn?: string; accountId: string; displayName?: string }
-interface GcpAccountBody { projectId: string; serviceAccountEmail: string; displayName?: string }
+interface GcpAccountBody { projectId: string; serviceAccountEmail: string; displayName?: string; billingProjectId?: string; billingDataset?: string; billingTable?: string }
 const gcpProjectIdPattern = /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
 const gcpServiceAccountPattern = /^[^\s@]+@[^\s@]+\.iam\.gserviceaccount\.com$/;
 const roleArnPattern = /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_\/-]{1,512}$/;
@@ -90,16 +90,21 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
     const serviceAccountEmail = typeof request.body?.serviceAccountEmail === "string" ? request.body.serviceAccountEmail.trim().toLowerCase() : "";
     const displayName = typeof request.body?.displayName === "string" && request.body.displayName.trim()
       ? request.body.displayName.trim().slice(0, 120) : "Google Cloud project " + projectId;
-    if (!gcpProjectIdPattern.test(projectId) || !gcpServiceAccountPattern.test(serviceAccountEmail)) {
-      return reply.code(400).send({ error: { code: "INVALID_GCP_ACCOUNT", message: "Provide a valid Google Cloud project ID and service-account email." } });
+    const billingProjectId = typeof request.body?.billingProjectId === "string" ? request.body.billingProjectId.trim() : "";
+    const billingDataset = typeof request.body?.billingDataset === "string" ? request.body.billingDataset.trim() : "";
+    const billingTable = typeof request.body?.billingTable === "string" ? request.body.billingTable.trim() : "";
+    const hasBillingConfig = Boolean(billingProjectId || billingDataset || billingTable);
+    if (!gcpProjectIdPattern.test(projectId) || !gcpServiceAccountPattern.test(serviceAccountEmail) ||
+        (hasBillingConfig && (!gcpProjectIdPattern.test(billingProjectId) || !/^[A-Za-z0-9_-]{1,1024}$/.test(billingDataset) || !/^[A-Za-z0-9_-]{1,1024}$/.test(billingTable)))) {
+      return reply.code(400).send({ error: { code: "INVALID_GCP_ACCOUNT", message: "Provide a valid Google Cloud project ID and service-account email. Billing export settings must include a valid project, dataset, and table." } });
     }
     try {
       const result = await withOrgTransaction(request.authContext.orgId, (client) => client.query(
-        "INSERT INTO cloud_accounts(org_id, provider, display_name, external_account_id, gcp_service_account_email) " +
-        "VALUES ($1,'gcp',$2,$3,$4) " +
-        "ON CONFLICT (org_id,provider,external_account_id) DO UPDATE SET display_name=EXCLUDED.display_name, gcp_service_account_email=EXCLUDED.gcp_service_account_email, status='pending', permission_status='not_checked', disconnected_at=NULL, last_error_code=NULL, updated_at=now() " +
+        "INSERT INTO cloud_accounts(org_id, provider, display_name, external_account_id, gcp_service_account_email, gcp_billing_project_id, gcp_billing_dataset, gcp_billing_table) " +
+        "VALUES ($1,'gcp',$2,$3,$4,$5,$6,$7) " +
+        "ON CONFLICT (org_id,provider,external_account_id) DO UPDATE SET display_name=EXCLUDED.display_name, gcp_service_account_email=EXCLUDED.gcp_service_account_email, gcp_billing_project_id=EXCLUDED.gcp_billing_project_id, gcp_billing_dataset=EXCLUDED.gcp_billing_dataset, gcp_billing_table=EXCLUDED.gcp_billing_table, status='pending', permission_status='not_checked', disconnected_at=NULL, last_error_code=NULL, updated_at=now() " +
         "RETURNING id, provider, display_name AS \"displayName\", external_account_id AS \"accountId\", gcp_service_account_email AS \"serviceAccountEmail\", status",
-        [request.authContext!.orgId, displayName, projectId, serviceAccountEmail],
+        [request.authContext!.orgId, displayName, projectId, serviceAccountEmail, billingProjectId || null, billingDataset || null, billingTable || null],
       ));
       const account = result.rows[0];
       await withOrgTransaction(request.authContext.orgId, (client) => client.query(
@@ -112,7 +117,7 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
       ));
       return reply.code(201).send({
         account,
-        nextStep: "Grant the CloudRoute runtime identity permission to impersonate this service account, and grant the service account Cloud Asset Viewer access to the project. Then validate the connection.",
+        nextStep: hasBillingConfig ? "Grant the CloudRoute runtime identity permission to impersonate this service account, Cloud Asset Viewer on the project, and BigQuery Data Viewer plus BigQuery Job User on the billing export. Then validate the connection." : "Grant the CloudRoute runtime identity permission to impersonate this service account, and grant the service account Cloud Asset Viewer access to the project. For cost reporting, configure the optional BigQuery billing export settings and permissions. Then validate the connection.",
       });
     } catch (error) {
       if ((error as { code?: string }).code === "23505") return reply.code(409).send({ error: { code: "ACCOUNT_EXISTS", message: "This Google Cloud project is already connected to this workspace." } });
