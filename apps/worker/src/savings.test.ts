@@ -11,7 +11,7 @@ const base = {
   display_name: "unused-volume",
   region: "us-east-1",
   resource_status: "available",
-  metadata: { attached: false, sizeGiB: 20, createTime: "2026-10-01T00:00:00.000Z" },
+  metadata: { attached: false, sizeGiB: 20, unattachedSince: "2026-10-01T00:00:00.000Z" },
 };
 
 test("flags explicitly unattached old volumes without inventing cost estimates", () => {
@@ -50,4 +50,17 @@ test("flags low utilization only when measured CPU evidence exists", () => {
   }], now);
   assert.equal(findings[0]?.ruleKey, "low_utilization_instance");
   assert.equal(findings[0]?.evidence.averageCpuPercent14d, 2.4);
+});
+
+test("does not infer stopped duration from an old instance launch time", () => {
+  const findings = buildIdleCandidates([{
+    ...base, resource_type: "compute_instance", resource_status: "stopped",
+    metadata: { launchTime: "2026-01-01T00:00:00.000Z", attachedVolumeIds: ["vol-123"] },
+  }, { ...base, metadata: { attached: true } }], now);
+  assert.equal(findings.some((finding) => finding.ruleKey === "stopped_instance_with_billable_disk"), false);
+});
+
+test("does not flag a volume as long-unattached without a detach timestamp", () => {
+  const findings = buildIdleCandidates([{ ...base, metadata: { attached: false, createTime: "2026-01-01T00:00:00.000Z" } }], now);
+  assert.equal(findings.length, 0);
 });
