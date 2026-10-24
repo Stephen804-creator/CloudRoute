@@ -410,3 +410,16 @@ h2 { margin-bottom: 0; font-size: clamp(28px, 3.2vw, 38px); letter-spacing: -0.0
 .billing-config { display: flex; flex-direction: column; gap: 11px; margin: 5px 0 8px; padding: 15px; border: 1px solid var(--line); border-radius: 9px; background: #fbfcfc; }
 .billing-config .eyebrow { margin-bottom: 0; }
 .billing-config .field-help { margin-bottom: 0; }
+
+.resource-detail-panel { margin-top: 16px; padding: 22px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
+.resource-detail-panel h3 { margin: 20px 0 10px; font-size: 14px; }
+.detail-json { max-width: 100%; max-height: 360px; overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: #f6f8f7; color: #344b56; font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.details-button { padding: 8px 10px; cursor: pointer; }
+.history-list { display: flex; flex-direction: column; gap: 10px; }
+.history-row { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.history-row > div { display: flex; flex-direction: column; gap: 5px; }
+.history-row strong { font-size: 12px; }
+.history-row small { color: var(--muted); font-size: 11px; }
+.history-row details { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+.history-row summary { cursor: pointer; }
+@media (max-width: 600px) { .resource-detail-panel { padding: 14px; } .history-row { grid-template-columns: 1fr; } }
