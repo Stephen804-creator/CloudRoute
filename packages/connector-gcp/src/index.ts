@@ -118,7 +118,8 @@ export class GcpInventoryConnector implements ReadOnlyCloudConnector {
       targetScopes: [CLOUD_PLATFORM_READ_SCOPE],
       lifetime: 900,
     });
-    const token = await impersonated.getAccessToken();
+    const tokenResponse = await impersonated.getAccessToken();
+    const token = typeof tokenResponse === "string" ? tokenResponse : tokenResponse.token;
     if (!token) throw new Error("GCP_ACCESS_TOKEN_UNAVAILABLE");
     return token;
   }
