@@ -95,7 +95,7 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
         "INSERT INTO cloud_accounts(org_id, provider, display_name, external_account_id, gcp_service_account_email) " +
         "VALUES ($1,'gcp',$2,$3,$4) " +
         "ON CONFLICT (org_id,provider,external_account_id) DO UPDATE SET display_name=EXCLUDED.display_name, gcp_service_account_email=EXCLUDED.gcp_service_account_email, status='pending', permission_status='not_checked', disconnected_at=NULL, last_error_code=NULL, updated_at=now() " +
-        "RETURNING id, provider, display_name AS \\"displayName\\", external_account_id AS \\"accountId\\", gcp_service_account_email AS \\"serviceAccountEmail\\", status",
+        "RETURNING id, provider, display_name AS \"displayName\", external_account_id AS \"accountId\", gcp_service_account_email AS \"serviceAccountEmail\", status",
         [request.authContext!.orgId, displayName, projectId, serviceAccountEmail],
       ));
       const account = result.rows[0];
