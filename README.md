@@ -1,12 +1,12 @@
 # CloudRoute
 
-CloudRoute is a read-first multi-cloud visibility platform for cloud resource inventory, cost visibility, synchronization health, and potential savings. The MVP supports read-only inventory connections for AWS and Google Cloud. Cost ingestion and savings findings remain later units.
+CloudRoute is a read-first multi-cloud visibility platform for cloud resource inventory, cost visibility, synchronization health, and potential savings. The MVP supports read-only inventory and billing visibility for AWS and Google Cloud, evidence-based savings findings, and configurable email notifications.
 
 **Safety boundary:** MVP access is read-only. CloudRoute must not create, modify, or delete customer cloud resources. It does not read data inside customer buckets, databases, or disks, and it does not store Lambda environment variables. Missing resources are marked as deleted only after a complete successful inventory run.
 
 ## Current implementation
 
-Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector on `build/unit-8-gcp`, stacked on that review branch.
+Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector. Units 9–12 extend inventory history, billing ingestion, savings findings, and notifications on `build/units-9-12`.
 
 - TypeScript pnpm monorepo with Next.js, Fastify API, PostgreSQL, a separate worker, and AWS connector packages.
 - PostgreSQL schema for users, organizations, memberships, sessions, accounts, resources, costs, findings, sync runs, audit log, and migration labels.
@@ -16,10 +16,14 @@ Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector on `build/unit-
 - Google Cloud project onboarding through short-lived service-account impersonation and Cloud Asset Inventory.
 - AWS metadata inventory for EC2 instances, EBS volumes, snapshots, Elastic IPs, S3 bucket metadata, RDS databases, Lambda function metadata, and load balancers.
 - Idempotent inventory sync, hourly refresh scheduling, partial-run safety, and Redis/BullMQ with PostgreSQL queue fallback.
+- Resource change history records actual state changes rather than every sync.
+- AWS Cost Explorer daily service costs and optional Google Cloud Billing export ingestion from BigQuery, with six-hour scheduling and idempotent restatement.
+- Evidence-based idle findings with conservative rules, auditable dismiss/snooze actions, and a savings workspace.
+- Organization-scoped notification preferences, weekly digest and connection-failure email outbox with retry handling.
 - Searchable/filterable inventory, migration labels, CSV export, account status, and an overview dashboard.
 - CI uses a non-superuser PostgreSQL role and attempts cross-tenant reads and writes.
 
-Provider cost ingestion, savings rules, email digests, password-signup email verification, and production deployment remain incomplete.
+Remaining gaps include live sandbox reconciliation for both billing providers, optional Cloud Monitoring/CloudWatch metrics for utilization rules, email-provider configuration, password-signup email verification, and production deployment.
 
 ## Stack
 
@@ -71,6 +75,7 @@ A live AWS connection requires a deployed CloudRoute runtime role. Set `CLOUDROU
 
 - [Unit 2–7 checklist](docs/UNIT-2-7-CHECKLIST.md)
 - [Unit 8 Google Cloud checklist](docs/UNIT-8-GCP-CHECKLIST.md)
+- [Units 9–12 checklist](docs/UNIT-9-12-CHECKLIST.md)
 - [Google Cloud read-only setup](docs/security/gcp-read-only-setup.md)
 - [Google Cloud impersonation decision](docs/architecture/decisions/0002-gcp-impersonation.md)
 - [Local development](docs/LOCAL-DEVELOPMENT.md)
