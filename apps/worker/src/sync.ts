@@ -3,6 +3,7 @@ import { fetchAwsInventory } from "@cloudroute/connector-aws/inventory";
 import { GcpInventoryConnector } from "@cloudroute/connector-gcp";
 import { getPool, withOrgTransaction } from "@cloudroute/db";
 import { evaluateIdleFindings } from "./savings.js";
+import { processCostSync } from "./cost-sync.js";
 
 interface SyncJob { syncRunId: string; orgId: string; accountId: string }
 interface NormalizedInventoryItem {
@@ -155,11 +156,12 @@ export async function pollQueuedRunsOnce(): Promise<boolean> {
   const organizations = await getPool().query<{ id: string }>("SELECT id FROM organizations ORDER BY created_at ASC");
   for (const organization of organizations.rows) {
     const result = await withOrgTransaction(organization.id, (client) => client.query<{ id: string; org_id: string; cloud_account_id: string }>(
-      "SELECT id, org_id, cloud_account_id FROM sync_runs WHERE status='queued' AND job_type='inventory_sync' ORDER BY created_at ASC LIMIT 1",
+      "SELECT id, org_id, cloud_account_id, job_type FROM sync_runs WHERE status='queued' AND job_type IN ('inventory_sync','cost_sync') ORDER BY created_at ASC LIMIT 1",
     ));
     const row = result.rows[0];
     if (!row) continue;
-    await processInventorySync({ syncRunId: row.id, orgId: row.org_id, accountId: row.cloud_account_id });
+    if (row.job_type === "cost_sync") await processCostSync({ syncRunId: row.id, orgId: row.org_id, accountId: row.cloud_account_id });
+    else await processInventorySync({ syncRunId: row.id, orgId: row.org_id, accountId: row.cloud_account_id });
     return true;
   }
   return false;
