@@ -12,7 +12,8 @@ Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector on `build/unit-
 - PostgreSQL schema for users, organizations, memberships, sessions, accounts, resources, costs, findings, sync runs, audit log, and migration labels.
 - Organization-scoped transactions and row-level security policies.
 - Email/password authentication with scrypt password hashes, opaque hashed sessions, and optional state-checked Google OAuth.
-- Read-only AWS role onboarding with an external ID and STS role assumption.\n- Google Cloud project onboarding through short-lived service-account impersonation and Cloud Asset Inventory.
+- Read-only AWS role onboarding with an external ID and STS role assumption.
+- Google Cloud project onboarding through short-lived service-account impersonation and Cloud Asset Inventory.
 - AWS metadata inventory for EC2 instances, EBS volumes, snapshots, Elastic IPs, S3 bucket metadata, RDS databases, Lambda function metadata, and load balancers.
 - Idempotent inventory sync, hourly refresh scheduling, partial-run safety, and Redis/BullMQ with PostgreSQL queue fallback.
 - Searchable/filterable inventory, migration labels, CSV export, account status, and an overview dashboard.
@@ -27,7 +28,8 @@ Provider cost ingestion, savings rules, email digests, password-signup email ver
 - Fastify REST API
 - PostgreSQL with row-level security
 - Redis / BullMQ (optional locally; PostgreSQL polling fallback is included)
-- AWS SDK v3 with temporary STS role credentials\n- Google Auth Library with short-lived service-account impersonation
+- AWS SDK v3 with temporary STS role credentials
+- Google Auth Library with short-lived service-account impersonation
 
 ## Local development
 
@@ -67,7 +69,10 @@ A live AWS connection requires a deployed CloudRoute runtime role. Set `CLOUDROU
 
 ## Project documents
 
-- [Unit 2–7 checklist](docs/UNIT-2-7-CHECKLIST.md)\n- [Unit 8 Google Cloud checklist](docs/UNIT-8-GCP-CHECKLIST.md)\n- [Google Cloud read-only setup](docs/security/gcp-read-only-setup.md)\n- [Google Cloud impersonation decision](docs/architecture/decisions/0002-gcp-impersonation.md)
+- [Unit 2–7 checklist](docs/UNIT-2-7-CHECKLIST.md)
+- [Unit 8 Google Cloud checklist](docs/UNIT-8-GCP-CHECKLIST.md)
+- [Google Cloud read-only setup](docs/security/gcp-read-only-setup.md)
+- [Google Cloud impersonation decision](docs/architecture/decisions/0002-gcp-impersonation.md)
 - [Local development](docs/LOCAL-DEVELOPMENT.md)
 - [Architecture decision: modular monolith](docs/architecture/decisions/0001-modular-monolith.md)
 
