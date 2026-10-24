@@ -45,8 +45,9 @@ async function main(): Promise<void> {
     // Also poll durable PostgreSQL queued runs so a transient Redis enqueue failure is recoverable.
     while (!stopping) {
       try {
+        const sent = await deliverQueuedEmailsOnce();
         const found = await pollQueuedRunsOnce();
-        if (!found) await new Promise((resolve) => setTimeout(resolve, 5000));
+        if (!found && !sent) await new Promise((resolve) => setTimeout(resolve, 5000));
       } catch (error) {
         console.error("Fallback queue polling failed", { message: error instanceof Error ? error.message : "unknown" });
         await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -62,8 +63,9 @@ async function main(): Promise<void> {
   process.once("SIGTERM", () => void shutdown());
   while (!stopping) {
     try {
+      const sent = await deliverQueuedEmailsOnce();
       const found = await pollQueuedRunsOnce();
-      if (!found) await new Promise((resolve) => setTimeout(resolve, 5000));
+      if (!found && !sent) await new Promise((resolve) => setTimeout(resolve, 5000));
     } catch (error) {
       console.error("Queue polling failed", { message: error instanceof Error ? error.message : "unknown" });
       await new Promise((resolve) => setTimeout(resolve, 5000));
