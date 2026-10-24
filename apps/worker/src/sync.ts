@@ -1,8 +1,63 @@
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { fetchAwsInventory } from "@cloudroute/connector-aws/inventory";
+import { GcpInventoryConnector } from "@cloudroute/connector-gcp";
 import { getPool, withOrgTransaction } from "@cloudroute/db";
 
 interface SyncJob { syncRunId: string; orgId: string; accountId: string }
+interface NormalizedInventoryItem {
+  externalId: string;
+  resourceType: string;
+  displayName: string | null;
+  region: string | null;
+  resourceStatus: string | null;
+  tags: Record<string, string>;
+  metadata: Record<string, unknown>;
+}
+interface InventoryResult { resources: NormalizedInventoryItem[]; complete: boolean; warnings: string[] }
+
+async function fetchGcpInventory(projectId: string, serviceAccountEmail: string): Promise<InventoryResult> {
+  const connector = new GcpInventoryConnector(serviceAccountEmail);
+  const resources: NormalizedInventoryItem[] = [];
+  const warnings: string[] = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+  do {
+    if (pages >= 500) {
+      warnings.push("GCP_INVENTORY_PAGE_LIMIT_REACHED");
+      return { resources, complete: false, warnings };
+    }
+    try {
+      const page = await connector.listResources({ provider: "gcp", accountId: projectId }, pageToken);
+      for (const resource of page.resources) {
+        const payload = resource.rawPayload;
+        const rawLabels = payload.labels;
+        const rawData = payload.data;
+        const tags = rawLabels !== null && typeof rawLabels === "object" && !Array.isArray(rawLabels)
+          ? Object.fromEntries(Object.entries(rawLabels).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+          : {};
+        const metadata = rawData !== null && typeof rawData === "object" && !Array.isArray(rawData)
+          ? rawData as Record<string, unknown> : {};
+        resources.push({
+          externalId: resource.providerResourceId,
+          resourceType: resource.resourceType,
+          displayName: resource.displayName,
+          region: resource.region,
+          resourceStatus: typeof payload.status === "string" ? payload.status : null,
+          tags,
+          metadata: { assetType: payload.assetType ?? null, providerUpdateTime: payload.updateTime ?? null, ...metadata },
+        });
+      }
+      pageToken = page.nextPageToken ?? undefined;
+      pages++;
+    } catch (error) {
+      if (!resources.length) throw error;
+      warnings.push(error instanceof Error && /^[A-Z0-9_:-]{1,80}$/.test(error.message) ? error.message : "GCP_INVENTORY_PAGE_FAILED");
+      return { resources, complete: false, warnings };
+    }
+  } while (pageToken);
+  return { resources, complete: true, warnings };
+}
+
 
 export async function processInventorySync(job: SyncJob): Promise<void> {
   const claimed = await withOrgTransaction(job.orgId, (client) => client.query(
