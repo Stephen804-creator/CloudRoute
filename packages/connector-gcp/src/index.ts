@@ -22,6 +22,22 @@ interface CloudAsset {
   resource?: { parent?: string; location?: string; data?: Record<string, unknown> };
 }
 interface AssetListResponse { assets?: CloudAsset[]; nextPageToken?: string }
+export async function getImpersonatedAccessToken(serviceAccountEmail: string, targetScope = CLOUD_PLATFORM_READ_SCOPE): Promise<string> {
+  if (!/^[^\\s@]+@[^\\s@]+\\.iam\\.gserviceaccount\\.com$/.test(serviceAccountEmail)) throw new Error("INVALID_GCP_SERVICE_ACCOUNT");
+  const sourceAuth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
+  const sourceClient = await sourceAuth.getClient();
+  const impersonated = new Impersonated({
+    sourceClient,
+    targetPrincipal: serviceAccountEmail,
+    targetScopes: [targetScope],
+    lifetime: 900,
+  });
+  const tokenResponse = await impersonated.getAccessToken();
+  const token = tokenResponse.token;
+  if (typeof token !== "string" || token.length === 0) throw new Error("GCP_ACCESS_TOKEN_UNAVAILABLE");
+  return token;
+}
+
 export interface GcpConnectorDependencies {
   getAccessToken?: () => Promise<string>;
   fetch?: typeof fetch;
