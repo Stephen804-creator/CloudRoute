@@ -7,7 +7,8 @@ CloudRoute is read-only. No MVP endpoint, worker, connector, or UI action may cr
 ## Credential handling
 
 - Never request or store a customer's long-lived AWS access keys.
-- AWS access uses a customer-created cross-account role, scoped to read-only actions and protected by an external ID.\n- Google Cloud access uses runtime Application Default Credentials to impersonate a customer-owned service account with short-lived tokens and a read-only scope. Customer private-key JSON files are not accepted.
+- AWS access uses a customer-created cross-account role, scoped to read-only actions and protected by an external ID.
+- Google Cloud access uses runtime Application Default Credentials to impersonate a customer-owned service account with short-lived tokens and a read-only scope. Customer private-key JSON files are not accepted.
 - Never log tokens, private keys, authorization headers, or complete credential payloads.
 - Never log tokens, private keys, authorization headers, or complete credential payloads.
 - Secrets belong in environment-specific secret storage, not source control.
