@@ -97,17 +97,19 @@ export async function deliverQueuedEmailsOnce(): Promise<boolean> {
   if (!apiKey || !from) return false;
   const organizations = await getPool().query<{ id: string }>("SELECT id FROM organizations ORDER BY created_at ASC");
   for (const organization of organizations.rows) {
-    const claim = await withOrgTransaction(organization.id, (client) => client.query<{
-      id: string; recipient: string; template_key: string; payload: Record<string, unknown>; attempts: number;
-    }>(
-      "SELECT id,recipient,template_key,payload,attempts FROM email_outbox WHERE status IN ('queued','failed') AND next_attempt_at <= now() ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",
-    ));
-    const item = claim.rows[0];
+    const claim = await withOrgTransaction(organization.id, async (client) => {
+      const selected = await client.query<{
+        id: string; recipient: string; template_key: string; payload: Record<string, unknown>; attempts: number;
+      }>(
+        "SELECT id,recipient,template_key,payload,attempts FROM email_outbox WHERE status IN ('queued','failed') AND next_attempt_at <= now() ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",
+      );
+      const selectedItem = selected.rows[0];
+      if (!selectedItem) return null;
+      await client.query("UPDATE email_outbox SET status='sending',attempts=attempts+1 WHERE id=$1 AND org_id=$2", [selectedItem.id, organization.id]);
+      return selectedItem;
+    });
+    const item = claim;
     if (!item) continue;
-    await withOrgTransaction(organization.id, (client) => client.query(
-      "UPDATE email_outbox SET status='sending',attempts=attempts+1 WHERE id=$1 AND org_id=$2",
-      [item.id, organization.id],
-    ));
     try {
       const message = emailText(item.template_key, item.payload);
       const response = await fetch("https://api.resend.com/emails", {
