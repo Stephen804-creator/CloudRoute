@@ -68,3 +68,17 @@ test("rejects invalid service account and project identifiers", async () => {
   const connector = new GcpInventoryConnector("reader@demo-prod.iam.gserviceaccount.com", { getAccessToken: async () => "token" });
   await assert.rejects(connector.listResources({ provider: "gcp", accountId: "Bad Project ID" }), /INVALID_GCP_PROJECT_ID/);
 });
+
+test("redacts function environment variables and secret-like fields before persistence", () => {
+  const result = normalizeGcpAsset({
+    name: "//cloudfunctions.googleapis.com/projects/demo-prod/locations/us-central1/functions/worker",
+    assetType: "cloudfunctions.googleapis.com/Function",
+    resource: { data: { name: "worker", serviceConfig: { environmentVariables: { API_KEY: "must-not-persist" }, secretEnvironmentVariables: [{ key: "TOKEN", projectId: "demo-prod", secret: "secret-name" }], availableMemory: "256M" }, labels: { team: "platform" } } },
+  }, "demo-prod");
+  assert.ok(result);
+  const serialized = JSON.stringify(result.rawPayload);
+  assert.equal(serialized.includes("must-not-persist"), false);
+  assert.equal(serialized.includes("environmentVariables"), false);
+  assert.equal(serialized.includes("secretEnvironmentVariables"), false);
+  assert.deepEqual(result.rawPayload.labels, { team: "platform" });
+});
