@@ -2,6 +2,7 @@ import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { CostExplorerClient, GetCostAndUsageCommand } from "@aws-sdk/client-cost-explorer";
 import { getImpersonatedAccessToken } from "@cloudroute/connector-gcp";
 import { getPool, withOrgTransaction } from "@cloudroute/db";
+import { queueConnectionFailure } from "./notifications.js";
 
 interface CostJob { syncRunId: string; orgId: string; accountId: string }
 interface CostRecord { date: string; service: string; currency: string; amount: string; region?: string | null }
@@ -88,12 +89,12 @@ async function fetchGcpCosts(account: Account): Promise<CostRecord[]> {
     if (response.status === 401 || response.status === 403) throw new Error("GCP_BILLING_PERMISSION_DENIED");
     throw new Error(response.status === 404 ? "GCP_BILLING_EXPORT_NOT_FOUND" : "GCP_BILLING_QUERY_FAILED");
   }
-  let page = await response.json() as { jobComplete?: boolean; jobReference?: { projectId?: string; jobId?: string }; schema?: { fields?: Array<{ name: string }> }; rows?: Array<{ f: Array<{ v: string | null }> }>; pageToken?: string; errors?: Array<{ reason?: string }> };
+  let page = await response.json() as { jobComplete?: boolean; jobReference?: { projectId?: string; jobId?: string; location?: string }; schema?: { fields?: Array<{ name: string }> }; rows?: Array<{ f: Array<{ v: string | null }> }>; pageToken?: string; errors?: Array<{ reason?: string }> };
   const deadline = Date.now() + 20_000;
   while (!page.jobComplete && page.jobReference?.jobId && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const poll = new URL(base + "/queries/" + encodeURIComponent(page.jobReference.jobId));
-    poll.searchParams.set("location", "US");
+    if (page.jobReference.location) poll.searchParams.set("location", page.jobReference.location);
     const polled = await fetch(poll, { headers: { authorization: "Bearer " + token, accept: "application/json" }, signal: AbortSignal.timeout(10_000) });
     if (!polled.ok) throw new Error("GCP_BILLING_QUERY_FAILED");
     page = await polled.json() as typeof page;
@@ -113,7 +114,7 @@ async function fetchGcpCosts(account: Account): Promise<CostRecord[]> {
   let pageToken = page.pageToken;
   while (pageToken) {
     const next = new URL(base + "/queries/" + encodeURIComponent(page.jobReference?.jobId ?? ""));
-    next.searchParams.set("location", "US"); next.searchParams.set("pageToken", pageToken); next.searchParams.set("maxResults", "1000");
+    if (page.jobReference?.location) next.searchParams.set("location", page.jobReference.location); next.searchParams.set("pageToken", pageToken); next.searchParams.set("maxResults", "1000");
     const nextResponse = await fetch(next, { headers: { authorization: "Bearer " + token, accept: "application/json" }, signal: AbortSignal.timeout(10_000) });
     if (!nextResponse.ok) throw new Error("GCP_BILLING_QUERY_FAILED");
     const nextPage = await nextResponse.json() as typeof page;
@@ -146,7 +147,7 @@ export async function processCostSync(job: CostJob): Promise<void> {
           "INSERT INTO cost_records(org_id,cloud_account_id,provider,period_start,period_end,service,region,amount,currency,attribution,source_updated_at) " +
           "VALUES ($1,$2,$3,$4::date,$5::date,$6,$7,$8::numeric,$9,'provider_reported',now()) " +
           "ON CONFLICT (cloud_account_id,period_start,period_end,service,region,currency) DO UPDATE SET amount=EXCLUDED.amount,attribution='provider_reported',source_updated_at=now()",
-          [job.orgId, account.id, account.provider, day, dateString(next), row.service.slice(0, 240), row.region ?? null, row.amount, row.currency.slice(0, 3)],
+          [job.orgId, account.id, account.provider, day, dateString(next), row.service.slice(0, 240), row.region ?? "", row.amount, row.currency.slice(0, 3)],
         );
       }
       await client.query("UPDATE sync_runs SET status='succeeded',finished_at=now(),resources_seen=$3,is_complete=true WHERE id=$1 AND org_id=$2", [job.syncRunId, job.orgId, rows.length]);
@@ -158,6 +159,7 @@ export async function processCostSync(job: CostJob): Promise<void> {
       await client.query("UPDATE sync_runs SET status='failed',finished_at=now(),error_code=$3,error_message='Cost sync failed. Check billing permissions and export configuration.',is_complete=false WHERE id=$1 AND org_id=$2", [job.syncRunId, job.orgId, code]);
       await client.query("UPDATE cloud_accounts SET last_cost_sync_status='failed',last_error_code=$3,updated_at=now() WHERE id=$1 AND org_id=$2", [job.accountId, job.orgId, code]);
     });
+    await queueConnectionFailure(job.orgId, job.accountId, code).catch(() => undefined);
     throw error;
   }
 }
