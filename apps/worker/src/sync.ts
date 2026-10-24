@@ -157,7 +157,7 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
 export async function pollQueuedRunsOnce(): Promise<boolean> {
   const organizations = await getPool().query<{ id: string }>("SELECT id FROM organizations ORDER BY created_at ASC");
   for (const organization of organizations.rows) {
-    const result = await withOrgTransaction(organization.id, (client) => client.query<{ id: string; org_id: string; cloud_account_id: string }>(
+    const result = await withOrgTransaction(organization.id, (client) => client.query<{ id: string; org_id: string; cloud_account_id: string; job_type: string }>(
       "SELECT id, org_id, cloud_account_id, job_type FROM sync_runs WHERE status='queued' AND job_type IN ('inventory_sync','cost_sync') ORDER BY created_at ASC LIMIT 1",
     ));
     const row = result.rows[0];
