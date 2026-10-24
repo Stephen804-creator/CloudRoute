@@ -8,7 +8,7 @@
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test src/sync.test.ts"
+    "test": "tsx --test src/sync.test.ts src/savings.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sts": "^3.883.0",
