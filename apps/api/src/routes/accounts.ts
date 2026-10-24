@@ -143,9 +143,42 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
       "SELECT id, provider, external_account_id, role_arn, external_id, gcp_service_account_email FROM cloud_accounts WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL",
       [request.params.id, request.authContext!.orgId],
     ));
-    const account = result.rows[0] as { id: string; provider: string; external_account_id: string; role_arn: string | null; external_id: string | null } | undefined;
+    const account = result.rows[0] as { id: string; provider: string; external_account_id: string; role_arn: string | null; external_id: string | null; gcp_service_account_email: string | null } | undefined;
     if (!account) return reply.code(404).send({ error: { code: "ACCOUNT_NOT_FOUND", message: "Cloud account was not found in this workspace." } });
-    if (account.provider !== "aws") return reply.code(501).send({ error: { code: "PROVIDER_NOT_READY", message: "This provider connector is not implemented yet." } });
+    if (account.provider === "gcp") {
+      if (!account.gcp_service_account_email) return reply.code(409).send({ error: { code: "SERVICE_ACCOUNT_NOT_CONFIGURED", message: "Save a Google Cloud service-account email before validating the connection." } });
+      try {
+        const { GcpInventoryConnector } = await import("@cloudroute/connector-gcp");
+        const connector = new GcpInventoryConnector(account.gcp_service_account_email);
+        await connector.validateConnection({ provider: "gcp", accountId: account.external_account_id });
+        await withOrgTransaction(request.authContext.orgId, (client) => client.query(
+          "UPDATE cloud_accounts SET status='connected', permission_status='valid', last_error_code=NULL, updated_at=now() WHERE id=$1 AND org_id=$2",
+          [account.id, request.authContext!.orgId],
+        ));
+        const run = await withOrgTransaction(request.authContext.orgId, async (client) => {
+          const existing = await client.query<{ id: string }>(
+            "SELECT id FROM sync_runs WHERE org_id=$1 AND cloud_account_id=$2 AND job_type='inventory_sync' AND status IN ('queued','running') ORDER BY created_at DESC LIMIT 1",
+            [request.authContext!.orgId, account.id],
+          );
+          if (existing.rows[0]) return { id: existing.rows[0].id };
+          const inserted = await client.query<{ id: string }>(
+            "INSERT INTO sync_runs(org_id, cloud_account_id, job_type, status) VALUES ($1,$2,'inventory_sync','queued') RETURNING id",
+            [request.authContext!.orgId, account.id],
+          );
+          return { id: inserted.rows[0]!.id };
+        });
+        try { await enqueueInventorySync({ syncRunId: run.id, orgId: request.authContext.orgId, accountId: account.id }); } catch { /* PostgreSQL polling recovers transient queue failures. */ }
+        return reply.send({ status: "connected", permissionStatus: "valid", syncRunId: run.id, message: "Google Cloud read-only access validated; initial inventory sync was queued." });
+      } catch (error) {
+        const code = error instanceof Error && /^[A-Z0-9_:-]{1,80}$/.test(error.message) ? error.message : "GCP_CONNECTION_VALIDATION_FAILED";
+        await withOrgTransaction(request.authContext.orgId, (client) => client.query(
+          "UPDATE cloud_accounts SET status='error', permission_status='insufficient', last_error_code=$3, updated_at=now() WHERE id=$1 AND org_id=$2",
+          [account.id, request.authContext!.orgId, code],
+        ));
+        return reply.code(400).send({ error: { code, message: "Google Cloud access could not be validated. Check project ID, API enablement, impersonation permission, and read-only asset permissions." } });
+      }
+    }
+    if (account.provider !== "aws") return reply.code(400).send({ error: { code: "UNSUPPORTED_PROVIDER", message: "This cloud provider is not supported." } });
     if (!account.role_arn || !account.external_id) return reply.code(409).send({ error: { code: "ROLE_NOT_CONFIGURED", message: "Save the AWS role ARN before validating the connection." } });
     try {
       const { STSClient, GetCallerIdentityCommand, AssumeRoleCommand } = await import("@aws-sdk/client-sts");
