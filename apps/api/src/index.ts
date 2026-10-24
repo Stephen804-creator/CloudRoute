@@ -9,6 +9,7 @@ import { registerResourceRoutes } from "./routes/resources.js";
 import { registerCostRoutes } from "./routes/costs.js";
 import { registerFindingRoutes } from "./routes/findings.js";
 import { registerResourceHistoryRoutes } from "./routes/resource-history.js";
+import { registerNotificationPreferenceRoutes } from "./routes/notification-preferences.js";
 import type { AuthContext } from "./auth/session.js";
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"), override: false });
@@ -40,6 +41,7 @@ await registerResourceRoutes(app);
 await registerResourceHistoryRoutes(app);
 await registerCostRoutes(app);
 await registerFindingRoutes(app);
+await registerNotificationPreferenceRoutes(app);
 
 const port = Number.parseInt(process.env.PORT ?? "4000", 10);
 const host = process.env.HOST ?? "127.0.0.1";
