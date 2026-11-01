@@ -242,18 +242,27 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
   app.delete<{ Params: { id: string } }>("/v1/accounts/:id", async (request, reply) => {
     if (!request.authContext) return;
     const disconnected = await withOrgTransaction(request.authContext.orgId, async (client) => {
-      const result = await client.query(
-        "UPDATE cloud_accounts SET status='disconnected', disconnected_at=now(), updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL RETURNING id",
+      // Serialize against the worker's final persistence transaction. If the
+      // worker commits first, its rows are deleted below; if this transaction
+      // commits first, the worker can no longer find the account to persist.
+      const account = await client.query<{ provider: string }>(
+        "SELECT provider FROM cloud_accounts WHERE id=$1 AND org_id=$2 FOR UPDATE",
         [request.params.id, request.authContext!.orgId],
       );
-      if (!result.rowCount) return false;
+      if (!account.rows[0]) return false;
+
       await client.query(
-        "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED' WHERE cloud_account_id=$1 AND org_id=$2 AND status IN ('queued','running')",
-        [request.params.id, request.authContext!.orgId],
+        "INSERT INTO audit_log(org_id,actor_user_id,action,target_type,target_id,details) VALUES ($1,$2,'cloud_account.disconnected','cloud_account',$3,$4::jsonb)",
+        [request.authContext!.orgId, request.authContext!.userId, request.params.id,
+          JSON.stringify({ provider: account.rows[0].provider, accountDataDeleted: true })],
       );
+
+      // cloud_accounts owns resources, costs, findings and sync runs through
+      // cascading foreign keys. Resource history and migration labels cascade
+      // from resources. The organization-level audit trail is retained.
       await client.query(
-        "INSERT INTO audit_log(org_id,actor_user_id,action,target_type,target_id,details) VALUES ($1,$2,'cloud_account.disconnected','cloud_account',$3,'{}'::jsonb)",
-        [request.authContext!.orgId, request.authContext!.userId, request.params.id],
+        "DELETE FROM cloud_accounts WHERE id=$1 AND org_id=$2",
+        [request.params.id, request.authContext!.orgId],
       );
       return true;
     });
