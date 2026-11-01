@@ -11,8 +11,23 @@ export interface AwsInventoryItem {
 }
 export interface AwsInventoryResult { resources: AwsInventoryItem[]; complete: boolean; warnings: string[] }
 
-function tagsToRecord(tags: Array<{ Key?: string | undefined; Value?: string | undefined }> | undefined): Record<string, string> {
-  return Object.fromEntries((tags ?? []).filter((tag) => tag.Key).map((tag) => [tag.Key!, tag.Value ?? ""]));
+const SENSITIVE_TAG_KEY = /(secret|password|token|credential|private.?key|access.?key|api.?key|authorization)/i;
+const SENSITIVE_TAG_VALUE = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bASIA[0-9A-Z]{16}\b|\bBearer\s+\S+|\b(password|token|secret|api[_-]?key)\s*[:=]\s*\S+)/i;
+
+/** Keep bounded operational tags while excluding obvious credential material. */
+export function sanitizeAwsTags(
+  tags: Array<{ Key?: string | undefined; Value?: string | undefined }> | undefined,
+): Record<string, string> {
+  const safe: Record<string, string> = {};
+  for (const tag of tags ?? []) {
+    const key = tag.Key;
+    const value = tag.Value ?? "";
+    if (!key || key.length > 128 || value.length > 256) continue;
+    if (SENSITIVE_TAG_KEY.test(key) || SENSITIVE_TAG_VALUE.test(value)) continue;
+    safe[key] = value;
+    if (Object.keys(safe).length >= 50) break;
+  }
+  return safe;
 }
 function arn(accountId: string, region: string, service: string, resource: string): string {
   return "arn:aws:" + service + ":" + region + ":" + accountId + ":" + resource;
@@ -52,9 +67,9 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
         const result = await ec2.send(new DescribeInstancesCommand({ NextToken: token, MaxResults: 1000 }));
         for (const reservation of result.Reservations ?? []) for (const instance of reservation.Instances ?? []) if (instance.InstanceId) resources.push({
           externalId: arn(accountId, region, "ec2", "instance/" + instance.InstanceId),
-          resourceType: "compute_instance", displayName: instance.Tags?.find((tag) => tag.Key === "Name")?.Value ?? instance.InstanceId,
-          region, resourceStatus: instance.State?.Name ?? null, tags: tagsToRecord(instance.Tags),
-          metadata: { instanceType: instance.InstanceType ?? null, launchTime: instance.LaunchTime?.toISOString() ?? null, platform: instance.PlatformDetails ?? instance.Platform ?? null, availabilityZone: instance.Placement?.AvailabilityZone ?? null, vpcId: instance.VpcId ?? null, subnetId: instance.SubnetId ?? null, attachedVolumeIds: (instance.BlockDeviceMappings ?? []).map((mapping) => mapping.Ebs?.VolumeId).filter((id): id is string => Boolean(id)) },
+          resourceType: "compute_instance", displayName: sanitizeAwsTags(instance.Tags).Name ?? instance.InstanceId,
+          region, resourceStatus: instance.State?.Name ?? null, tags: sanitizeAwsTags(instance.Tags),
+          metadata: { instanceType: instance.InstanceType ?? null, launchTime: instance.LaunchTime?.toISOString() ?? null, platform: instance.PlatformDetails ?? instance.Platform ?? null, availabilityZone: instance.Placement?.AvailabilityZone ?? null, attachedVolumeIds: (instance.BlockDeviceMappings ?? []).map((mapping) => mapping.Ebs?.VolumeId).filter((id): id is string => Boolean(id)) },
         });
         token = result.NextToken;
       } while (token);
@@ -65,8 +80,8 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
         const result = await ec2.send(new DescribeVolumesCommand({ NextToken: token, MaxResults: 500 }));
         for (const volume of result.Volumes ?? []) if (volume.VolumeId) resources.push({
           externalId: arn(accountId, region, "ec2", "volume/" + volume.VolumeId), resourceType: "block_volume",
-          displayName: volume.Tags?.find((tag) => tag.Key === "Name")?.Value ?? volume.VolumeId, region,
-          resourceStatus: volume.State ?? null, tags: tagsToRecord(volume.Tags),
+          displayName: sanitizeAwsTags(volume.Tags).Name ?? volume.VolumeId, region,
+          resourceStatus: volume.State ?? null, tags: sanitizeAwsTags(volume.Tags),
           metadata: { sizeGiB: volume.Size ?? null, volumeType: volume.VolumeType ?? null, encrypted: volume.Encrypted ?? null, attached: Boolean(volume.Attachments?.length), createTime: volume.CreateTime?.toISOString() ?? null },
         });
         token = result.NextToken;
@@ -76,9 +91,9 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
       const result = await ec2.send(new DescribeAddressesCommand({}));
       for (const address of result.Addresses ?? []) if (address.AllocationId || address.PublicIp) resources.push({
         externalId: address.AllocationId ? arn(accountId, region, "ec2", "elastic-ip/" + address.AllocationId) : "aws:ec2:" + region + ":public-ip:" + address.PublicIp,
-        resourceType: "static_ip", displayName: address.PublicIp ?? address.AllocationId ?? null, region,
-        resourceStatus: address.AssociationId ? "associated" : "unassociated", tags: tagsToRecord(address.Tags),
-        metadata: { allocationId: address.AllocationId ?? null, associationId: address.AssociationId ?? null, networkInterfaceId: address.NetworkInterfaceId ?? null },
+        resourceType: "static_ip", displayName: address.AllocationId ?? "Elastic IP", region,
+        resourceStatus: address.AssociationId ? "associated" : "unassociated", tags: sanitizeAwsTags(address.Tags),
+        metadata: { allocationId: address.AllocationId ?? null, associated: Boolean(address.AssociationId) },
       });
     } catch { warnings.push("EC2_ADDRESSES_FAILED:" + region); }
     try {
@@ -87,8 +102,8 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
         const result = await ec2.send(new DescribeSnapshotsCommand({ OwnerIds: ["self"], NextToken: token, MaxResults: 1000 }));
         for (const snapshot of result.Snapshots ?? []) if (snapshot.SnapshotId) resources.push({
           externalId: arn(accountId, region, "ec2", "snapshot/" + snapshot.SnapshotId), resourceType: "snapshot",
-          displayName: snapshot.Tags?.find((tag) => tag.Key === "Name")?.Value ?? snapshot.SnapshotId, region,
-          resourceStatus: snapshot.State ?? null, tags: tagsToRecord(snapshot.Tags),
+          displayName: sanitizeAwsTags(snapshot.Tags).Name ?? snapshot.SnapshotId, region,
+          resourceStatus: snapshot.State ?? null, tags: sanitizeAwsTags(snapshot.Tags),
           metadata: { volumeSizeGiB: snapshot.VolumeSize ?? null, encrypted: snapshot.Encrypted ?? null, startTime: snapshot.StartTime?.toISOString() ?? null, sourceVolumeId: snapshot.VolumeId ?? null },
         });
         token = result.NextToken;
@@ -132,7 +147,7 @@ export async function fetchAwsInventory(credentials: AwsCredentialIdentity, acco
         for (const lb of result.LoadBalancers ?? []) if (lb.LoadBalancerArn) resources.push({
           externalId: lb.LoadBalancerArn, resourceType: "load_balancer", displayName: lb.LoadBalancerName ?? lb.LoadBalancerArn,
           region, resourceStatus: lb.State?.Code ?? null, tags: {},
-          metadata: { scheme: lb.Scheme ?? null, type: lb.Type ?? null, vpcId: lb.VpcId ?? null, dnsName: lb.DNSName ?? null },
+          metadata: { scheme: lb.Scheme ?? null, type: lb.Type ?? null, dnsName: lb.DNSName ?? null },
         });
         marker = result.NextMarker;
       } while (marker);
