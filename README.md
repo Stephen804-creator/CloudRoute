@@ -14,10 +14,15 @@ Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector. Units 9–12 e
 - Email/password authentication with scrypt password hashes, opaque hashed sessions, and optional state-checked Google OAuth.
 - Read-only AWS role onboarding with an external ID and STS role assumption.
 - Google Cloud project onboarding through short-lived service-account impersonation and Cloud Asset Inventory.
+- AWS metadata inventory for EC2 instances, EBS volumes, snapshots, Elastic IPs, S3 bucket metadata, RDS databases, Lambda function metadata, and load balancers.
 - Idempotent inventory sync, hourly refresh scheduling, partial-run safety, and Redis/BullMQ with PostgreSQL queue fallback.
-- Resource change history, AWS Cost Explorer ingestion, optional GCP BigQuery billing export ingestion, conservative savings findings, and configurable email notifications.
+- Resource change history records actual state changes rather than every sync.
+- AWS Cost Explorer daily service costs and optional Google Cloud Billing export ingestion from BigQuery, with idempotent restatement.
+- Evidence-based idle findings with conservative rules, auditable dismiss/snooze actions, and a savings workspace.
+- Organization-scoped notification preferences, weekly digest and connection-failure email outbox with retry handling.
+- Searchable/filterable inventory, migration labels, CSV export, account status, and an overview dashboard.
 - Liveness and database-backed readiness endpoints; production startup validation for database TLS and HTTPS origin.
-- CI includes build, typecheck, tests, migrations, and PostgreSQL tenant-isolation checks.
+- CI uses a non-superuser PostgreSQL role and exercises cross-tenant reads and writes.
 
 ## Stack
 
@@ -26,11 +31,14 @@ Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector. Units 9–12 e
 - Fastify REST API
 - PostgreSQL with row-level security
 - Redis / BullMQ (optional locally; PostgreSQL polling fallback is included)
-- AWS SDK v3 and Google Auth Library using short-lived credentials
+- AWS SDK v3 with temporary STS role credentials
+- Google Auth Library with short-lived service-account impersonation
 
 ## Local development
 
 Follow [docs/LOCAL-DEVELOPMENT.md](docs/LOCAL-DEVELOPMENT.md).
+
+Quick setup:
 
 ```bash
 cp .env.example .env
@@ -43,7 +51,7 @@ pnpm dev:worker
 pnpm dev:web
 ```
 
-Run validation:
+Run the build, type checks, and tests:
 
 ```bash
 pnpm build
@@ -51,21 +59,33 @@ pnpm typecheck
 pnpm test
 ```
 
-## Security and operations
+## AWS connection requirements
 
+The account connection flow creates a unique external ID, accepts a customer-created IAM role ARN, validates it using STS, and queues inventory. CloudRoute never asks for long-lived AWS access keys.
+
+See:
+- [AWS read-only permissions](docs/security/aws-read-only-policy.json)
+- [AWS trust policy template](docs/security/aws-role-trust-template.json)
 - [Security baseline](docs/security/SECURITY.md)
+
+A live AWS connection requires a deployed CloudRoute runtime role. Set `CLOUDROUTE_AWS_PRINCIPAL_ARN` to that exact role ARN before using the onboarding wizard. Do not replace it with an unrelated or broad principal.
+
+## Project documents
+
+- [Unit 2–7 checklist](docs/UNIT-2-7-CHECKLIST.md)
+- [Unit 8 Google Cloud checklist](docs/UNIT-8-GCP-CHECKLIST.md)
+- [Units 9–12 checklist](docs/UNIT-9-12-CHECKLIST.md)
+- [Units 13–16 checklist](docs/UNIT-13-16-CHECKLIST.md)
 - [Integration contracts](docs/architecture/INTEGRATION-CONTRACTS.md)
 - [Production operations runbook](docs/operations/PRODUCTION-RUNBOOK.md)
+- [Google Cloud read-only setup](docs/security/gcp-read-only-setup.md)
+- [Google Cloud impersonation decision](docs/architecture/decisions/0002-gcp-impersonation.md)
 - [Local development](docs/LOCAL-DEVELOPMENT.md)
+- [Architecture decision: modular monolith](docs/architecture/decisions/0001-modular-monolith.md)
 
-The MVP is not production-approved until the live provider, browser journey, backup restoration, email delivery, security, and canary release gates in the checklist have evidence.
+## Security
 
-## Project checklists
-
-- [Unit 2–7](docs/UNIT-2-7-CHECKLIST.md)
-- [Unit 8 Google Cloud](docs/UNIT-8-GCP-CHECKLIST.md)
-- [Units 9–12](docs/UNIT-9-12-CHECKLIST.md)
-- [Units 13–16](docs/UNIT-13-16-CHECKLIST.md)
+Never commit `.env`, customer credentials, access tokens, or raw cloud data. Use a dedicated non-superuser database role so row-level security is exercised. Review the exact requested provider permissions before connecting an account. The MVP is not production-ready until CI passes and the live integration and deployment checks in the checklists are completed.
 
 ## License
 

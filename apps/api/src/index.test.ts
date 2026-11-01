@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { closePool } from "@cloudroute/db";
 import { app } from "./index.js";
 
 test("GET /health reports API liveness and read-only mode", async () => {
@@ -67,4 +68,5 @@ test("sign-up rejects weak passwords before database access", async () => {
 
 test.after(async () => {
   await app.close();
+  await closePool();
 });
