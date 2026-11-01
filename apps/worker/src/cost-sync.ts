@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { CostExplorerClient, GetCostAndUsageCommand } from "@aws-sdk/client-cost-explorer";
 import { getImpersonatedAccessToken } from "@cloudroute/connector-gcp";
@@ -124,12 +125,23 @@ async function fetchGcpCosts(account: Account): Promise<CostRecord[]> {
 }
 
 export async function processCostSync(job: CostJob): Promise<void> {
+  const leaseToken = randomUUID();
   const claimed = await withOrgTransaction(job.orgId, (client) => client.query(
-    "UPDATE sync_runs SET status='running',started_at=now(),finished_at=NULL,error_code=NULL,error_message=NULL " +
+    "UPDATE sync_runs SET status='running',started_at=now(),finished_at=NULL,error_code=NULL,error_message=NULL, " +
+    "lease_token=$4,lease_expires_at=now()+interval '15 minutes' " +
     "WHERE id=$1 AND org_id=$2 AND cloud_account_id=$3 AND job_type='cost_sync' AND status IN ('queued','failed') RETURNING id",
-    [job.syncRunId, job.orgId, job.accountId],
+    [job.syncRunId, job.orgId, job.accountId, leaseToken],
   ));
   if (!claimed.rows[0]) return;
+
+  const heartbeat = setInterval(() => {
+    void withOrgTransaction(job.orgId, (client) => client.query(
+      "UPDATE sync_runs SET lease_expires_at=now()+interval '15 minutes' WHERE id=$1 AND org_id=$2 AND lease_token=$3 AND status='running'",
+      [job.syncRunId, job.orgId, leaseToken],
+    )).catch(() => undefined);
+  }, 60_000);
+  heartbeat.unref();
+
   try {
     const result = await withOrgTransaction(job.orgId, (client) => client.query(
       "SELECT id,provider,external_account_id,role_arn,external_id,gcp_service_account_email,gcp_billing_project_id,gcp_billing_dataset,gcp_billing_table " +
@@ -140,17 +152,23 @@ export async function processCostSync(job: CostJob): Promise<void> {
     if (!account) throw new Error("ACCOUNT_UNAVAILABLE");
     const rows = account.provider === "aws" ? await fetchAwsCosts(account) : account.provider === "gcp" ? await fetchGcpCosts(account) : (() => { throw new Error("UNSUPPORTED_PROVIDER"); })();
     const persisted = await withOrgTransaction(job.orgId, async (client) => {
+      // Keep lock order consistent with account deletion: account first, then run.
       const activeAccount = await client.query(
         "SELECT id FROM cloud_accounts WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL FOR UPDATE",
         [account.id, job.orgId],
       );
       if (!activeAccount.rowCount) {
         await client.query(
-          "UPDATE sync_runs SET status='cancelled',finished_at=now(),error_code='ACCOUNT_DISCONNECTED',is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
-          [job.syncRunId, job.orgId],
+          "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false, lease_token=NULL, lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3",
+          [job.syncRunId, job.orgId, leaseToken],
         );
         return false;
       }
+      const activeRun = await client.query(
+        "SELECT id FROM sync_runs WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3 AND lease_expires_at>now() FOR UPDATE",
+        [job.syncRunId, job.orgId, leaseToken],
+      );
+      if (!activeRun.rowCount) return false;
       for (const row of rows) {
         const day = row.date.slice(0, 10);
         const next = new Date(day + "T00:00:00.000Z"); next.setUTCDate(next.getUTCDate() + 1);
@@ -161,17 +179,19 @@ export async function processCostSync(job: CostJob): Promise<void> {
           [job.orgId, account.id, account.provider, day, dateString(next), row.service.slice(0, 240), row.region ?? "", row.amount, row.currency.slice(0, 3)],
         );
       }
-      await client.query("UPDATE sync_runs SET status='succeeded',finished_at=now(),resources_seen=$3,is_complete=true WHERE id=$1 AND org_id=$2", [job.syncRunId, job.orgId, rows.length]);
+      await client.query("UPDATE sync_runs SET status='succeeded',finished_at=now(),resources_seen=$3,is_complete=true,lease_token=NULL,lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND lease_token=$4", [job.syncRunId, job.orgId, rows.length, leaseToken]);
       await client.query("UPDATE cloud_accounts SET last_cost_sync_at=now(),last_cost_sync_status='succeeded',updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL", [account.id, job.orgId]);
       return true;
     });
+    clearInterval(heartbeat);
     if (!persisted) return;
   } catch (error) {
+    clearInterval(heartbeat);
     const code = error instanceof Error && /^[A-Z0-9_:-]{1,80}$/.test(error.message) ? error.message : "COST_SYNC_FAILED";
     if (code === "ACCOUNT_UNAVAILABLE" || code === "ACCOUNT_DISCONNECTED") {
       await withOrgTransaction(job.orgId, (client) => client.query(
-        "UPDATE sync_runs SET status='cancelled',finished_at=now(),error_code='ACCOUNT_DISCONNECTED',is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
-        [job.syncRunId, job.orgId],
+        "UPDATE sync_runs SET status='cancelled',finished_at=now(),error_code='ACCOUNT_DISCONNECTED',is_complete=false,lease_token=NULL,lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3",
+        [job.syncRunId, job.orgId, leaseToken],
       ));
       return;
     }
