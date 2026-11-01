@@ -47,10 +47,10 @@ test("expired sync leases are requeued while active leases remain running", { sk
 
     const recovered=await recoverExpiredSyncRunsOnce();
     assert.ok(recovered >= 1);
-    const states=await query<{id:string;status:string;lease_token:string|null;lease_expires_at:Date|null;error_code:string|null}>(
+    const states=await withOrgTransaction(orgId, client => client.query<{id:string;status:string;lease_token:string|null;lease_expires_at:Date|null;error_code:string|null}>(
       "SELECT id,status,lease_token,lease_expires_at,error_code FROM sync_runs WHERE id=ANY($1::uuid[])",
       [[expiredRunId,activeRunId]],
-    );
+    ));
     const expired=states.rows.find(row=>row.id===expiredRunId);
     const active=states.rows.find(row=>row.id===activeRunId);
     assert.equal(expired?.status,"queued");
