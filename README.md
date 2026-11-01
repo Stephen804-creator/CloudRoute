@@ -70,6 +70,10 @@ See:
 
 A live AWS connection requires a deployed CloudRoute runtime role. Set `CLOUDROUTE_AWS_PRINCIPAL_ARN` to that exact role ARN before using the onboarding wizard. Do not replace it with an unrelated or broad principal.
 
+## Product definition and delivery baseline
+
+Read the authoritative [CloudRoute product documentation](docs/product/README.md) before implementing new work. It contains the product requirements, technical requirements, current data schema, design brief, and milestone-based implementation and verification plan.
+
 ## Project documents
 
 - [Unit 2–7 checklist](docs/UNIT-2-7-CHECKLIST.md)
