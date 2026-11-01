@@ -169,13 +169,6 @@ export async function processCostSync(job: CostJob): Promise<void> {
         [job.syncRunId, job.orgId, leaseToken],
       );
       if (!activeRun.rowCount) return false;
-      if (!activeAccount.rowCount) {
-        await client.query(
-          "UPDATE sync_runs SET status='cancelled',finished_at=now(),error_code='ACCOUNT_DISCONNECTED',is_complete=false,lease_token=NULL,lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3",
-          [job.syncRunId, job.orgId, leaseToken],
-        );
-        return false;
-      }
       for (const row of rows) {
         const day = row.date.slice(0, 10);
         const next = new Date(day + "T00:00:00.000Z"); next.setUTCDate(next.getUTCDate() + 1);

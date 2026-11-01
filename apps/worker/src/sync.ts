@@ -137,13 +137,6 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
         [job.syncRunId, job.orgId, leaseToken],
       );
       if (!activeRun.rowCount) return false;
-      if (!activeAccount.rowCount) {
-        await client.query(
-          "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false, lease_token=NULL, lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3",
-          [job.syncRunId, job.orgId, leaseToken],
-        );
-        return false;
-      }
       for (const item of inventory.resources) {
         const upsert = await client.query(
           "INSERT INTO resources(org_id, cloud_account_id, provider, external_id, resource_type, display_name, region, resource_status, tags, metadata, last_seen_at, deleted_detected_at, connector_version) " +
