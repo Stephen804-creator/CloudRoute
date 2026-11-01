@@ -10,6 +10,7 @@ on:
       - build/units-9-12
       - build/units-13-16
       - build/security-integration-verification
+      - build/production-validation-gates
   pull_request:
     branches:
       - main
@@ -17,6 +18,8 @@ on:
       - build/unit-8-gcp
       - build/units-9-12
       - build/units-13-16
+      - build/security-integration-verification
+      - build/production-validation-gates
 
 permissions:
   contents: read
@@ -69,9 +72,9 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -d cloudroute -v ON_ERROR_STOP=1 \
-            -c "CREATE ROLE cloudroute_app LOGIN PASSWORD 'cloudroute_ci_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;" \
-            -c "ALTER DATABASE cloudroute OWNER TO cloudroute_app;" \
+          psql -h localhost -U postgres -d cloudroute -v ON_ERROR_STOP=1 \\
+            -c "CREATE ROLE cloudroute_app LOGIN PASSWORD 'cloudroute_ci_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;" \\
+            -c "ALTER DATABASE cloudroute OWNER TO cloudroute_app;" \\
             -c "GRANT ALL ON SCHEMA public TO cloudroute_app;"
       - name: Apply database migrations
         run: pnpm db:migrate
