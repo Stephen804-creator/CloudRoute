@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import { closePool, getPool, withOrgTransaction, withTransaction } from "./client.js";
+import { closePool, withOrgTransaction, withTransaction } from "./client.js";
 
-test("row-level security blocks cross-tenant reads and writes", { skip: !process.env.DATABASE_URL }, async () => {
+test("row-level security blocks cross-tenant reads and writes across core and Unit 9–12 data", { skip: !process.env.DATABASE_URL }, async () => {
   const suffix = randomUUID();
   let userA = "";
   let userB = "";
@@ -36,10 +36,37 @@ test("row-level security blocks cross-tenant reads and writes", { skip: !process
     ));
     accountA = account.rows[0]!.id;
 
-    const crossRead = await withOrgTransaction(orgB, (client) => client.query(
-      "SELECT id FROM cloud_accounts WHERE id=$1", [accountA],
-    ));
-    assert.equal(crossRead.rowCount, 0, "tenant B must not read tenant A's account");
+    await withOrgTransaction(orgA, async (client) => {
+      const resource = await client.query<{ id: string }>(
+        "INSERT INTO resources(org_id,cloud_account_id,provider,external_id,resource_type,display_name) VALUES ($1,$2,'aws','i-' || $3,'ec2_instance','Tenant A resource') RETURNING id",
+        [orgA, accountA, suffix],
+      );
+      await client.query(
+        "INSERT INTO cost_records(org_id,cloud_account_id,provider,period_start,period_end,service,amount,currency) VALUES ($1,$2,'aws',CURRENT_DATE,CURRENT_DATE + 1,'Amazon EC2',12.5,'USD')",
+        [orgA, accountA],
+      );
+      await client.query(
+        "INSERT INTO findings(org_id,cloud_account_id,resource_id,rule_key,title,description) VALUES ($1,$2,$3,'test_rule','Tenant A finding','RLS integration fixture')",
+        [orgA, accountA, resource.rows[0]!.id],
+      );
+      await client.query("INSERT INTO notification_preferences(org_id) VALUES ($1)", [orgA]);
+      await client.query(
+        "INSERT INTO email_outbox(org_id,recipient,template_key,dedupe_key) VALUES ($1,'tenant-a@example.test','weekly_digest',$2)",
+        [orgA, "rls-test:" + suffix],
+      );
+    });
+
+    const crossRead = await withOrgTransaction(orgB, async (client) => {
+      const accounts = await client.query("SELECT id FROM cloud_accounts WHERE id=$1", [accountA]);
+      const resources = await client.query("SELECT id FROM resources WHERE org_id=$1", [orgA]);
+      const costs = await client.query("SELECT id FROM cost_records WHERE org_id=$1", [orgA]);
+      const findings = await client.query("SELECT id FROM findings WHERE org_id=$1", [orgA]);
+      const history = await client.query("SELECT id FROM resource_history WHERE org_id=$1", [orgA]);
+      const preferences = await client.query("SELECT org_id FROM notification_preferences WHERE org_id=$1", [orgA]);
+      const outbox = await client.query("SELECT id FROM email_outbox WHERE org_id=$1", [orgA]);
+      return [accounts, resources, costs, findings, history, preferences, outbox];
+    });
+    for (const result of crossRead) assert.equal(result.rowCount, 0, "tenant B must not read tenant A data");
 
     await assert.rejects(
       withOrgTransaction(orgB, (client) => client.query(
@@ -48,6 +75,14 @@ test("row-level security blocks cross-tenant reads and writes", { skip: !process
       )),
       (error: unknown) => (error as { code?: string }).code === "42501",
       "tenant B must not write a row for tenant A",
+    );
+    await assert.rejects(
+      withOrgTransaction(orgB, (client) => client.query(
+        "INSERT INTO notification_preferences(org_id) VALUES ($1)",
+        [orgA],
+      )),
+      (error: unknown) => (error as { code?: string }).code === "42501",
+      "tenant B must not create tenant A notification preferences",
     );
   } finally {
     if (orgA || orgB) await withTransaction(async (client) => {
