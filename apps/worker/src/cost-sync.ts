@@ -152,15 +152,23 @@ export async function processCostSync(job: CostJob): Promise<void> {
     if (!account) throw new Error("ACCOUNT_UNAVAILABLE");
     const rows = account.provider === "aws" ? await fetchAwsCosts(account) : account.provider === "gcp" ? await fetchGcpCosts(account) : (() => { throw new Error("UNSUPPORTED_PROVIDER"); })();
     const persisted = await withOrgTransaction(job.orgId, async (client) => {
+      // Keep lock order consistent with account deletion: account first, then run.
+      const activeAccount = await client.query(
+        "SELECT id FROM cloud_accounts WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL FOR UPDATE",
+        [account.id, job.orgId],
+      );
+      if (!activeAccount.rowCount) {
+        await client.query(
+          "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false, lease_token=NULL, lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3",
+          [job.syncRunId, job.orgId, leaseToken],
+        );
+        return false;
+      }
       const activeRun = await client.query(
         "SELECT id FROM sync_runs WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3 AND lease_expires_at>now() FOR UPDATE",
         [job.syncRunId, job.orgId, leaseToken],
       );
       if (!activeRun.rowCount) return false;
-      const activeAccount = await client.query(
-        "SELECT id FROM cloud_accounts WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL FOR UPDATE",
-        [account.id, job.orgId],
-      );
       if (!activeAccount.rowCount) {
         await client.query(
           "UPDATE sync_runs SET status='cancelled',finished_at=now(),error_code='ACCOUNT_DISCONNECTED',is_complete=false,lease_token=NULL,lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3",
