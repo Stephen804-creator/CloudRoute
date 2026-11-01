@@ -29,12 +29,14 @@ test("AWS tag projection bounds customer-controlled metadata and excludes creden
     { Key: "oversized", Value: "x".repeat(257) },
     { Key: "x".repeat(129), Value: "ignored" },
     { Key: "safe", Value: "kept" },
+    { Key: "__proto__", Value: "polluted" },
   ]);
   assert.deepEqual(tags, {
     Name: "production-api",
     environment: "production",
     safe: "kept",
   });
+  assert.equal(Object.hasOwn(tags, "__proto__"), false);
 });
 
 test("AWS tag projection caps the number of persisted tags", () => {

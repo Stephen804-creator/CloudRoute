@@ -18,16 +18,17 @@ const SENSITIVE_TAG_VALUE = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{
 export function sanitizeAwsTags(
   tags: Array<{ Key?: string | undefined; Value?: string | undefined }> | undefined,
 ): Record<string, string> {
-  const safe: Record<string, string> = {};
+  const safe = new Map<string, string>();
   for (const tag of tags ?? []) {
     const key = tag.Key;
     const value = tag.Value ?? "";
     if (!key || key.length > 128 || value.length > 256) continue;
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
     if (SENSITIVE_TAG_KEY.test(key) || SENSITIVE_TAG_VALUE.test(value)) continue;
-    safe[key] = value;
-    if (Object.keys(safe).length >= 50) break;
+    safe.set(key, value);
+    if (safe.size >= 50) break;
   }
-  return safe;
+  return Object.fromEntries(safe);
 }
 function arn(accountId: string, region: string, service: string, resource: string): string {
   return "arn:aws:" + service + ":" + region + ":" + accountId + ":" + resource;
