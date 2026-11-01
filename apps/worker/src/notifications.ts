@@ -91,6 +91,14 @@ function emailText(template: string, payload: Record<string, unknown>): { subjec
   };
 }
 
+export function emailRetryDelayMinutes(attempts: number): number {
+  const safeAttempts = Number.isFinite(attempts) ? Math.max(1, Math.floor(attempts)) : 1;
+  return Math.min(360, 5 * Math.pow(2, Math.min(safeAttempts - 1, 10)));
+}
+
+const MAX_EMAIL_ATTEMPTS = 8;
+const EMAIL_DELIVERY_LEASE_MINUTES = 5;
+
 export async function deliverQueuedEmailsOnce(): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.NOTIFICATION_FROM_EMAIL;
@@ -101,11 +109,17 @@ export async function deliverQueuedEmailsOnce(): Promise<boolean> {
       const selected = await client.query<{
         id: string; recipient: string; template_key: string; payload: Record<string, unknown>; attempts: number;
       }>(
-        "SELECT id,recipient,template_key,payload,attempts FROM email_outbox WHERE status IN ('queued','failed') AND next_attempt_at <= now() ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",
+        "SELECT id,recipient,template_key,payload,attempts FROM email_outbox " +
+        "WHERE attempts < $1 AND next_attempt_at <= now() AND status IN ('queued','failed','sending') " +
+        "ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",
+        [MAX_EMAIL_ATTEMPTS],
       );
       const selectedItem = selected.rows[0];
       if (!selectedItem) return null;
-      await client.query("UPDATE email_outbox SET status='sending',attempts=attempts+1 WHERE id=$1 AND org_id=$2", [selectedItem.id, organization.id]);
+      await client.query(
+        "UPDATE email_outbox SET status='sending',attempts=attempts+1,next_attempt_at=now()+($3::int * interval '1 minute') WHERE id=$1 AND org_id=$2",
+        [selectedItem.id, organization.id, EMAIL_DELIVERY_LEASE_MINUTES],
+      );
       return selectedItem;
     });
     const item = claim;
@@ -114,7 +128,7 @@ export async function deliverQueuedEmailsOnce(): Promise<boolean> {
       const message = emailText(item.template_key, item.payload);
       const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
-        headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" },
+        headers: { authorization: "Bearer " + apiKey, "content-type": "application/json", "idempotency-key": "cloudroute-outbox-" + item.id },
         body: JSON.stringify({ from, to: [item.recipient], subject: message.subject, text: message.text }),
         signal: AbortSignal.timeout(15000),
       });
@@ -125,11 +139,19 @@ export async function deliverQueuedEmailsOnce(): Promise<boolean> {
       ));
     } catch (error) {
       const code = error instanceof Error && /^[A-Z0-9_:-]{1,80}$/.test(error.message) ? error.message : "EMAIL_DELIVERY_FAILED";
-      const retryMinutes = Math.min(360, 5 * Math.pow(2, Math.min(item.attempts, 6)));
-      await withOrgTransaction(organization.id, (client) => client.query(
-        "UPDATE email_outbox SET status='failed',last_error_code=$3,next_attempt_at=now()+($4::int * interval '1 minute') WHERE id=$1 AND org_id=$2",
-        [item.id, organization.id, code, retryMinutes],
-      ));
+      const attempts = item.attempts + 1;
+      if (attempts >= MAX_EMAIL_ATTEMPTS) {
+        await withOrgTransaction(organization.id, (client) => client.query(
+          "UPDATE email_outbox SET status='failed',last_error_code=$3,next_attempt_at='infinity'::timestamptz WHERE id=$1 AND org_id=$2",
+          [item.id, organization.id, code],
+        ));
+      } else {
+        const retryMinutes = emailRetryDelayMinutes(attempts);
+        await withOrgTransaction(organization.id, (client) => client.query(
+          "UPDATE email_outbox SET status='failed',last_error_code=$3,next_attempt_at=now()+($4::int * interval '1 minute') WHERE id=$1 AND org_id=$2",
+          [item.id, organization.id, code, retryMinutes],
+        ));
+      }
     }
     return true;
   }
