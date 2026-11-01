@@ -76,6 +76,8 @@ jobs:
             -c "CREATE ROLE cloudroute_app LOGIN PASSWORD 'cloudroute_ci_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;" \
             -c "ALTER DATABASE cloudroute OWNER TO cloudroute_app;" \
             -c "GRANT ALL ON SCHEMA public TO cloudroute_app;"
+      - name: Validate backup and restore script syntax
+        run: bash -n scripts/backup-postgres.sh scripts/restore-postgres.sh
       - name: Apply database migrations
         run: pnpm db:migrate
       - name: Build workspace packages in dependency order
