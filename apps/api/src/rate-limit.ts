@@ -27,12 +27,12 @@ export async function incrementRateLimitBucket(
   windowSeconds: number,
 ): Promise<{ requestCount: number; windowStartedAt: Date | string }> {
   const result = await query<{ request_count: number; window_started_at: Date | string }>(
+    "WITH current_window AS (SELECT to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2) AS started_at) " +
     "INSERT INTO api_rate_limits(bucket_key,window_started_at,request_count,expires_at) " +
-    "VALUES ($1,to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2),1,now()+($2::int * interval '2 seconds')) " +
+    "SELECT $1,current_window.started_at,1,current_window.started_at+($2::int * interval '2 seconds') FROM current_window " +
     "ON CONFLICT (bucket_key) DO UPDATE SET " +
-    "request_count=CASE WHEN api_rate_limits.window_started_at < to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2) THEN 1 ELSE api_rate_limits.request_count+1 END, " +
-    "window_started_at=to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2), " +
-    "expires_at=now()+($2::int * interval '2 seconds') " +
+    "request_count=CASE WHEN api_rate_limits.window_started_at < EXCLUDED.window_started_at THEN 1 ELSE api_rate_limits.request_count+1 END, " +
+    "window_started_at=EXCLUDED.window_started_at, expires_at=EXCLUDED.expires_at " +
     "RETURNING request_count,window_started_at",
     [bucketKey, windowSeconds],
   );
