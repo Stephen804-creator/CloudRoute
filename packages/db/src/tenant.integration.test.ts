@@ -37,6 +37,11 @@ test("row-level security blocks cross-tenant reads, updates, deletes, and insert
       await client.query("INSERT INTO notification_preferences(org_id) VALUES ($1)",[orgA]);
       const outbox=await client.query<{id:string}>("INSERT INTO email_outbox(org_id,recipient,template_key,dedupe_key) VALUES ($1,'tenant-a@example.test','weekly_digest',$2) RETURNING id",[orgA,"rls-test:"+suffix]);
       ids.outbox=outbox.rows[0]!.id;
+      const sync=await client.query<{id:string}>(
+        "INSERT INTO sync_runs(org_id,cloud_account_id,job_type,status) VALUES ($1,$2,'inventory_sync','queued') RETURNING id",
+        [orgA,accountA],
+      );
+      ids.syncRun=sync.rows[0]!.id;
     });
 
     const reads=await withOrgTransaction(orgB,client=>Promise.all([
@@ -89,6 +94,29 @@ test("row-level security blocks cross-tenant reads, updates, deletes, and insert
     assert.equal(unchanged[1].rows[0]?.display_name,"Tenant A resource");
     assert.equal(unchanged[2].rows[0]?.amount,"12.500000");
     assert.equal(unchanged[3].rows[0]?.title,"Tenant A finding");
+
+    await withOrgTransaction(orgA, async client => {
+      await client.query(
+        "INSERT INTO audit_log(org_id,actor_user_id,action,target_type,target_id,details) VALUES ($1,$2,'cloud_account.disconnected','cloud_account',$3,$4::jsonb)",
+        [orgA,userA,accountA,JSON.stringify({ provider: "aws", accountDataDeleted: true })],
+      );
+      await client.query("DELETE FROM cloud_accounts WHERE id=$1 AND org_id=$2",[accountA,orgA]);
+      for (const [table,id] of [
+        ["cloud_accounts",accountA],["resources",ids.resource],["cost_records",ids.cost],
+        ["findings",ids.finding],["resource_history",ids.history],["sync_runs",ids.syncRun],
+      ] as const) {
+        const remaining=await client.query("SELECT 1 FROM " + table + " WHERE id=$1",[id]);
+        assert.equal(remaining.rowCount,0,table + " must be purged when a cloud account is disconnected");
+      }
+      const audit=await client.query(
+        "SELECT details FROM audit_log WHERE org_id=$1 AND action='cloud_account.disconnected' AND target_id=$2",
+        [orgA,accountA],
+      );
+      assert.equal(audit.rowCount,1,"organization audit trail must survive account data deletion");
+      assert.equal(audit.rows[0]?.details?.accountDataDeleted,true);
+      assert.equal((await client.query("SELECT 1 FROM notification_preferences WHERE org_id=$1",[orgA])).rowCount,1);
+      assert.equal((await client.query("SELECT 1 FROM email_outbox WHERE id=$1",[ids.outbox])).rowCount,1);
+    });
   } finally {
     if(orgA||orgB) await withTransaction(async client=>{
       if(orgA) await client.query("DELETE FROM organizations WHERE id=$1",[orgA]);
