@@ -1,16 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { closePool } from "@cloudroute/db";
 import { app } from "./index.js";
 
 test("GET /health reports API liveness and read-only mode", async () => {
   const response = await app.inject({ method: "GET", url: "/health" });
-
   assert.equal(response.statusCode, 200);
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "cloudroute-api",
     mode: "read-only",
   });
+});
+
+test("GET /health remains independent of database availability", async () => {
+  const response = await app.inject({ method: "GET", url: "/health" });
+  assert.equal(response.statusCode, 200);
+});
+
+test("GET /ready checks database availability without exposing connection details", { skip: !process.env.DATABASE_URL }, async () => {
+  const response = await app.inject({ method: "GET", url: "/ready" });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { status: "ready", service: "cloudroute-api" });
+  assert.doesNotMatch(response.body, /postgres|password|DATABASE_URL/i);
+});
+
+test("security response headers are present on API responses", async () => {
+  const response = await app.inject({ method: "GET", url: "/health" });
+  assert.equal(response.headers["x-content-type-options"], "nosniff");
+  assert.equal(response.headers["x-frame-options"], "DENY");
+  assert.equal(response.headers["referrer-policy"], "no-referrer");
+  assert.equal(response.headers["cache-control"], "no-store");
+});
+
+test("unsafe requests reject a mismatched browser origin", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/auth/signup",
+    headers: { origin: "https://attacker.example", "content-type": "application/json" },
+    payload: { email: "test@example.com", fullName: "Test User", password: "a-strong-password-123" },
+  });
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.json().error.code, "ORIGIN_NOT_ALLOWED");
 });
 
 test("unknown API routes return 404", async () => {
@@ -37,4 +68,5 @@ test("sign-up rejects weak passwords before database access", async () => {
 
 test.after(async () => {
   await app.close();
+  await closePool();
 });

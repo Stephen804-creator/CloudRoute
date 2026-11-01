@@ -6,10 +6,10 @@ CloudRoute is a read-first multi-cloud visibility platform for cloud resource in
 
 ## Current implementation
 
-Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector. Units 9–12 extend inventory history, billing ingestion, savings findings, and notifications on `build/units-9-12`.
+Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector. Units 9–12 extend inventory history, billing ingestion, savings findings, and notifications on `build/units-9-12`. Units 13–16 add integration contracts, production security checks, expanded tenant isolation tests, readiness probes, and an operations runbook on `build/units-13-16`.
 
-- TypeScript pnpm monorepo with Next.js, Fastify API, PostgreSQL, a separate worker, and AWS connector packages.
-- PostgreSQL schema for users, organizations, memberships, sessions, accounts, resources, costs, findings, sync runs, audit log, and migration labels.
+- TypeScript pnpm monorepo with Next.js, Fastify API, PostgreSQL, a separate worker, and AWS/GCP connector packages.
+- PostgreSQL schema for users, organizations, memberships, sessions, accounts, resources, costs, findings, sync runs, audit log, migration labels, history, and notification outbox.
 - Organization-scoped transactions and row-level security policies.
 - Email/password authentication with scrypt password hashes, opaque hashed sessions, and optional state-checked Google OAuth.
 - Read-only AWS role onboarding with an external ID and STS role assumption.
@@ -17,13 +17,12 @@ Units 2–7 are in PR #2. Unit 8 adds the Google Cloud connector. Units 9–12 e
 - AWS metadata inventory for EC2 instances, EBS volumes, snapshots, Elastic IPs, S3 bucket metadata, RDS databases, Lambda function metadata, and load balancers.
 - Idempotent inventory sync, hourly refresh scheduling, partial-run safety, and Redis/BullMQ with PostgreSQL queue fallback.
 - Resource change history records actual state changes rather than every sync.
-- AWS Cost Explorer daily service costs and optional Google Cloud Billing export ingestion from BigQuery, with six-hour scheduling and idempotent restatement.
+- AWS Cost Explorer daily service costs and optional Google Cloud Billing export ingestion from BigQuery, with idempotent restatement.
 - Evidence-based idle findings with conservative rules, auditable dismiss/snooze actions, and a savings workspace.
 - Organization-scoped notification preferences, weekly digest and connection-failure email outbox with retry handling.
 - Searchable/filterable inventory, migration labels, CSV export, account status, and an overview dashboard.
-- CI uses a non-superuser PostgreSQL role and attempts cross-tenant reads and writes.
-
-Remaining gaps include live sandbox reconciliation for both billing providers, optional Cloud Monitoring/CloudWatch metrics for utilization rules, email-provider configuration, password-signup email verification, and production deployment.
+- Liveness and database-backed readiness endpoints; production startup validation for database TLS and HTTPS origin.
+- CI uses a non-superuser PostgreSQL role and exercises cross-tenant reads and writes.
 
 ## Stack
 
@@ -76,6 +75,9 @@ A live AWS connection requires a deployed CloudRoute runtime role. Set `CLOUDROU
 - [Unit 2–7 checklist](docs/UNIT-2-7-CHECKLIST.md)
 - [Unit 8 Google Cloud checklist](docs/UNIT-8-GCP-CHECKLIST.md)
 - [Units 9–12 checklist](docs/UNIT-9-12-CHECKLIST.md)
+- [Units 13–16 checklist](docs/UNIT-13-16-CHECKLIST.md)
+- [Integration contracts](docs/architecture/INTEGRATION-CONTRACTS.md)
+- [Production operations runbook](docs/operations/PRODUCTION-RUNBOOK.md)
 - [Google Cloud read-only setup](docs/security/gcp-read-only-setup.md)
 - [Google Cloud impersonation decision](docs/architecture/decisions/0002-gcp-impersonation.md)
 - [Local development](docs/LOCAL-DEVELOPMENT.md)
@@ -83,7 +85,7 @@ A live AWS connection requires a deployed CloudRoute runtime role. Set `CLOUDROU
 
 ## Security
 
-Never commit `.env`, customer credentials, access tokens, or raw cloud data. Use a dedicated non-superuser database role so row-level security is exercised. Review the exact requested provider permissions before connecting an account. The MVP is not production-ready until CI passes and the live integration and deployment checks in the checklist are completed.
+Never commit `.env`, customer credentials, access tokens, or raw cloud data. Use a dedicated non-superuser database role so row-level security is exercised. Review the exact requested provider permissions before connecting an account. The MVP is not production-ready until CI passes and the live integration and deployment checks in the checklists are completed.
 
 ## License
 
