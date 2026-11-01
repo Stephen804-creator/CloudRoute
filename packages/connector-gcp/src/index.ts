@@ -50,10 +50,10 @@ const RESOURCE_DATA_FIELDS: ResourceDataFieldMap = {
     "name", "state", "runtime", "availableMemory", "timeout", "entryPoint", "updateTime", "labels",
   ],
   "compute.googleapis.com/ForwardingRule": [
-    "name", "region", "IPAddress", "IPProtocol", "loadBalancingScheme", "portRange", "labels",
+    "name", "region", "IPProtocol", "loadBalancingScheme", "portRange", "labels",
   ],
   "compute.googleapis.com/Address": [
-    "name", "address", "status", "addressType", "ipVersion", "region", "labels",
+    "name", "status", "addressType", "ipVersion", "region", "labels",
   ],
   "compute.googleapis.com/Snapshot": [
     "name", "status", "diskSizeGb", "sourceDisk", "storageBytes", "creationTimestamp", "labels",
@@ -115,6 +115,8 @@ function mapLocation(asset: CloudAsset, data: Record<string, unknown>): string |
   return stringValue(asset.resource?.location);
 }
 
+const SENSITIVE_LABEL_VALUE = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|\\bAKIA[0-9A-Z]{16}\\b|\\bASIA[0-9A-Z]{16}\\b|\\bBearer\\s+\\S+|\\b(password|token|secret|api[_-]?key)\\s*[:=]\\s*\\S+)/i;
+
 function mapLabels(data: Record<string, unknown>): Record<string, string> {
   const labels = record(data.labels);
   return Object.fromEntries(
@@ -123,7 +125,8 @@ function mapLabels(data: Record<string, unknown>): Record<string, string> {
         typeof entry[1] === "string" &&
         entry[0].length <= 63 &&
         entry[1].length <= 63 &&
-        !/(secret|password|token|credential|key)/i.test(entry[0]),
+        !/(secret|password|token|credential|key)/i.test(entry[0]) &&
+        !SENSITIVE_LABEL_VALUE.test(entry[1]),
       )
       .slice(0, 64),
   );

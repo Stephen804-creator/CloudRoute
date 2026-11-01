@@ -38,8 +38,10 @@ test("drops nested workload metadata and fields outside the resource allowlist",
         metadata: { items: [{ key: "startup-script", value: "must-not-persist" }] },
         serviceAccounts: [{ email: "runtime@demo-prod.iam.gserviceaccount.com", scopes: ["https://example.invalid"] }],
         networkInterfaces: [{ accessConfigs: [{ natIP: "203.0.113.10" }] }],
+        forwardingRules: [{ IPAddress: "203.0.113.11" }],
+        address: "203.0.113.12",
         disks: [{ initializeParams: { sourceImage: "private-image" } }],
-        labels: { team: "platform", API_KEY: "must-not-persist", nested: { value: "must-not-persist" } },
+        labels: { team: "platform", API_KEY: "must-not-persist", description: "Bearer hidden-token", owner: "password=hidden", nested: { value: "must-not-persist" } },
       },
     },
   }, "demo-prod");
@@ -49,6 +51,10 @@ test("drops nested workload metadata and fields outside the resource allowlist",
   assert.equal(serialized.includes("startup-script"), false);
   assert.equal(serialized.includes("runtime@demo-prod"), false);
   assert.equal(serialized.includes("203.0.113.10"), false);
+  assert.equal(serialized.includes("203.0.113.11"), false);
+  assert.equal(serialized.includes("203.0.113.12"), false);
+  assert.equal(serialized.includes("hidden-token"), false);
+  assert.equal(serialized.includes("password=hidden"), false);
   assert.equal(serialized.includes("private-image"), false);
   assert.deepEqual(result.rawPayload.data, {
     name: "web-01",
