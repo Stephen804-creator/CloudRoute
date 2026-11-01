@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { fetchAwsInventory } from "@cloudroute/connector-aws/inventory";
 import { GcpInventoryConnector } from "@cloudroute/connector-gcp";
@@ -63,12 +64,22 @@ async function fetchGcpInventory(projectId: string, serviceAccountEmail: string)
 
 
 export async function processInventorySync(job: SyncJob): Promise<void> {
+  const leaseToken = randomUUID();
   const claimed = await withOrgTransaction(job.orgId, (client) => client.query(
-    "UPDATE sync_runs SET status='running', started_at=now(), finished_at=NULL, error_code=NULL, error_message=NULL " +
+    "UPDATE sync_runs SET status='running', started_at=now(), finished_at=NULL, error_code=NULL, error_message=NULL, " +
+    "lease_token=$4, lease_expires_at=now()+interval '15 minutes' " +
     "WHERE id=$1 AND org_id=$2 AND cloud_account_id=$3 AND job_type='inventory_sync' AND status IN ('queued','failed') RETURNING id, started_at",
-    [job.syncRunId, job.orgId, job.accountId],
+    [job.syncRunId, job.orgId, job.accountId, leaseToken],
   ));
   if (!claimed.rows[0]) return;
+
+  const heartbeat = setInterval(() => {
+    void withOrgTransaction(job.orgId, (client) => client.query(
+      "UPDATE sync_runs SET lease_expires_at=now()+interval '15 minutes' WHERE id=$1 AND org_id=$2 AND lease_token=$3 AND status='running'",
+      [job.syncRunId, job.orgId, leaseToken],
+    )).catch(() => undefined);
+  }, 60_000);
+  heartbeat.unref();
 
   try {
     const accountResult = await withOrgTransaction(job.orgId, (client) => client.query(
@@ -109,14 +120,19 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
     let missing = 0;
     const startedAt = claimed.rows[0].started_at;
     const persisted = await withOrgTransaction(job.orgId, async (client) => {
+      const activeRun = await client.query(
+        "SELECT id FROM sync_runs WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3 AND lease_expires_at>now() FOR UPDATE",
+        [job.syncRunId, job.orgId, leaseToken],
+      );
+      if (!activeRun.rowCount) return false;
       const activeAccount = await client.query(
         "SELECT id FROM cloud_accounts WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL FOR UPDATE",
         [account.id, job.orgId],
       );
       if (!activeAccount.rowCount) {
         await client.query(
-          "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
-          [job.syncRunId, job.orgId],
+          "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false, lease_token=NULL, lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3",
+          [job.syncRunId, job.orgId, leaseToken],
         );
         return false;
       }
@@ -140,8 +156,8 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
       if (inventory.complete) await evaluateIdleFindings(client, job.orgId, account.id);
       const status = inventory.complete ? "succeeded" : "partial";
       await client.query(
-        "UPDATE sync_runs SET status=$2, finished_at=now(), resources_seen=$3, resources_created=$4, resources_updated=$5, resources_missing=$6, error_code=$7, error_message=$8, is_complete=$9 WHERE id=$1 AND org_id=$10",
-        [job.syncRunId, status, inventory.resources.length, created, updated, missing, inventory.complete ? null : "PARTIAL_PROVIDER_RESPONSE", inventory.complete ? null : inventory.warnings.slice(0, 20).join(","), inventory.complete, job.orgId],
+        "UPDATE sync_runs SET status=$2, finished_at=now(), resources_seen=$3, resources_created=$4, resources_updated=$5, resources_missing=$6, error_code=$7, error_message=$8, is_complete=$9, lease_token=NULL, lease_expires_at=NULL WHERE id=$1 AND org_id=$10 AND lease_token=$11",
+        [job.syncRunId, status, inventory.resources.length, created, updated, missing, inventory.complete ? null : "PARTIAL_PROVIDER_RESPONSE", inventory.complete ? null : inventory.warnings.slice(0, 20).join(","), inventory.complete, job.orgId, leaseToken],
       );
       await client.query(
         "UPDATE cloud_accounts SET status=$3, last_sync_at=now(), last_sync_status=$4, last_error_code=$5, updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL",
@@ -149,13 +165,15 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
       );
       return true;
     });
+    clearInterval(heartbeat);
     if (!persisted) return;
   } catch (error) {
+    clearInterval(heartbeat);
     const code = error instanceof Error && /^[A-Z0-9_:-]{1,80}$/.test(error.message) ? error.message : "INVENTORY_SYNC_FAILED";
     if (code === "ACCOUNT_UNAVAILABLE" || code === "ACCOUNT_DISCONNECTED") {
       await withOrgTransaction(job.orgId, (client) => client.query(
-        "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
-        [job.syncRunId, job.orgId],
+        "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false, lease_token=NULL, lease_expires_at=NULL WHERE id=$1 AND org_id=$2 AND status='running' AND lease_token=$3",
+        [job.syncRunId, job.orgId, leaseToken],
       ));
       return;
     }
@@ -174,7 +192,23 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
   }
 }
 
+export async function recoverExpiredSyncRunsOnce(): Promise<number> {
+  const organizations = await getPool().query<{ id: string }>("SELECT id FROM organizations ORDER BY created_at ASC");
+  let recovered = 0;
+  for (const organization of organizations.rows) {
+    const result = await withOrgTransaction(organization.id, (client) => client.query(
+      "UPDATE sync_runs SET status='queued', started_at=NULL, finished_at=NULL, lease_token=NULL, lease_expires_at=NULL, " +
+      "error_code='WORKER_LEASE_EXPIRED', error_message='A previous worker stopped before completing this job.' " +
+      "WHERE status='running' AND COALESCE(lease_expires_at, started_at + interval '15 minutes', created_at + interval '15 minutes') <= now() " +
+      "RETURNING id",
+    ));
+    recovered += result.rowCount ?? 0;
+  }
+  return recovered;
+}
+
 export async function pollQueuedRunsOnce(): Promise<boolean> {
+  await recoverExpiredSyncRunsOnce();
   const organizations = await getPool().query<{ id: string }>("SELECT id FROM organizations ORDER BY created_at ASC");
   for (const organization of organizations.rows) {
     const result = await withOrgTransaction(organization.id, (client) => client.query<{ id: string; org_id: string; cloud_account_id: string; job_type: string }>(
