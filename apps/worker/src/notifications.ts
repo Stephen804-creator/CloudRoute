@@ -98,6 +98,13 @@ export function emailRetryDelayMinutes(attempts: number): number {
 
 const MAX_EMAIL_ATTEMPTS = 8;
 const EMAIL_DELIVERY_LEASE_MINUTES = 5;
+export const EMAIL_IDEMPOTENCY_WINDOW_HOURS = 23;
+
+export function canRetryEmailAttempt(lastAttemptAt: Date | string | null, now = Date.now()): boolean {
+  if (lastAttemptAt === null) return true;
+  const timestamp = new Date(lastAttemptAt).getTime();
+  return Number.isFinite(timestamp) && timestamp >= now - EMAIL_IDEMPOTENCY_WINDOW_HOURS * 60 * 60 * 1000;
+}
 
 export async function deliverQueuedEmailsOnce(): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
@@ -106,24 +113,36 @@ export async function deliverQueuedEmailsOnce(): Promise<boolean> {
   const organizations = await getPool().query<{ id: string }>("SELECT id FROM organizations ORDER BY created_at ASC");
   for (const organization of organizations.rows) {
     const claim = await withOrgTransaction(organization.id, async (client) => {
+      // Resend retains idempotency keys for 24 hours. Stop automatic retries
+      // before that window expires so a long worker outage cannot duplicate a
+      // message whose provider acceptance was never acknowledged locally.
+      await client.query(
+        "UPDATE email_outbox SET status='failed',last_error_code='EMAIL_IDEMPOTENCY_WINDOW_EXPIRED',next_attempt_at='infinity'::timestamptz " +
+        "WHERE org_id=$1 AND status IN ('sending','failed') AND attempts>0 " +
+        "AND last_attempt_at < now()-($2::int * interval '1 hour')",
+        [organization.id, EMAIL_IDEMPOTENCY_WINDOW_HOURS],
+      );
       const selected = await client.query<{
-        id: string; recipient: string; template_key: string; payload: Record<string, unknown>; attempts: number; cloud_account_id: string | null;
+        id: string; recipient: string; template_key: string; payload: Record<string, unknown>; attempts: number;
+        cloud_account_id: string | null; last_attempt_at: Date | string | null;
       }>(
-        "SELECT id,recipient,template_key,payload,attempts,cloud_account_id FROM email_outbox " +
+        "SELECT id,recipient,template_key,payload,attempts,cloud_account_id,last_attempt_at FROM email_outbox " +
         "WHERE attempts < $1 AND next_attempt_at <= now() AND status IN ('queued','failed','sending') " +
+        "AND (last_attempt_at IS NULL OR last_attempt_at >= now()-($2::int * interval '1 hour')) " +
         "ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",
-        [MAX_EMAIL_ATTEMPTS],
+        [MAX_EMAIL_ATTEMPTS, EMAIL_IDEMPOTENCY_WINDOW_HOURS],
       );
       const selectedItem = selected.rows[0];
       if (!selectedItem) return null;
       await client.query(
-        "UPDATE email_outbox SET status='sending',attempts=attempts+1,next_attempt_at=now()+($3::int * interval '1 minute') WHERE id=$1 AND org_id=$2",
+        "UPDATE email_outbox SET status='sending',attempts=attempts+1,last_attempt_at=now(),next_attempt_at=now()+($3::int * interval '1 minute') WHERE id=$1 AND org_id=$2",
         [selectedItem.id, organization.id, EMAIL_DELIVERY_LEASE_MINUTES],
       );
       return selectedItem;
     });
     const item = claim;
     if (!item) continue;
+    if (!canRetryEmailAttempt(item.last_attempt_at)) continue;
     if (item.cloud_account_id) {
       const stillActive = await withOrgTransaction(organization.id, client => client.query(
         "SELECT e.id FROM email_outbox e JOIN cloud_accounts a ON a.id=e.cloud_account_id AND a.org_id=e.org_id " +
