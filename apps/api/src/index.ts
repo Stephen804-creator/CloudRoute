@@ -13,6 +13,7 @@ import { registerFindingRoutes } from "./routes/findings.js";
 import { registerResourceHistoryRoutes } from "./routes/resource-history.js";
 import { registerNotificationPreferenceRoutes } from "./routes/notification-preferences.js";
 import type { AuthContext } from "./auth/session.js";
+import { enforceRateLimit } from "./rate-limit.js";
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env"), override: false });
 
@@ -25,11 +26,14 @@ app.addHook("onRequest", async (request, reply) => {
   if (unsafe && !isAllowedBrowserOrigin(request.headers.origin, process.env.PUBLIC_APP_ORIGIN, process.env.NODE_ENV === "production")) {
     return reply.code(403).send({ error: { code: "ORIGIN_NOT_ALLOWED", message: "Request origin is not allowed." } });
   }
+  await enforceRateLimit(request, reply);
 });
 app.addHook("onSend", async (_request, reply, payload) => {
   reply.header("x-content-type-options", "nosniff");
   reply.header("x-frame-options", "DENY");
   reply.header("referrer-policy", "no-referrer");
+  reply.header("content-security-policy", "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  reply.header("permissions-policy", "camera=(), microphone=(), geolocation=()");
   reply.header("cache-control", "no-store");
   if (process.env.NODE_ENV === "production") {
     reply.header("strict-transport-security", "max-age=63072000; includeSubDomains");
