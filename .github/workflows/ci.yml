@@ -9,6 +9,9 @@ on:
       - build/unit-8-gcp
       - build/units-9-12
       - build/units-13-16
+      - build/security-integration-verification
+      - build/units-13-16
+      - build/security-integration-verification
   pull_request:
     branches:
       - main
