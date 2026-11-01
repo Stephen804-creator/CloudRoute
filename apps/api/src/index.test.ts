@@ -30,6 +30,8 @@ test("security response headers are present on API responses", async () => {
   assert.equal(response.headers["x-content-type-options"], "nosniff");
   assert.equal(response.headers["x-frame-options"], "DENY");
   assert.equal(response.headers["referrer-policy"], "no-referrer");
+  assert.equal(response.headers["content-security-policy"], "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  assert.equal(response.headers["permissions-policy"], "camera=(), microphone=(), geolocation=()");
   assert.equal(response.headers["cache-control"], "no-store");
 });
 
@@ -54,6 +56,16 @@ test("tenant-scoped endpoints reject requests without a session", async () => {
     const response = await app.inject({ method: "GET", url });
     assert.equal(response.statusCode, 401, url + " must require authentication");
   }
+});
+
+test("organization deletion requires authentication", async () => {
+  const response = await app.inject({
+    method: "DELETE",
+    url: "/v1/organizations/11111111-1111-4111-8111-111111111111",
+    headers: { "content-type": "application/json" },
+    payload: { confirmName: "Example workspace" },
+  });
+  assert.equal(response.statusCode, 401);
 });
 
 test("sign-up rejects weak passwords before database access", async () => {

@@ -22,8 +22,46 @@ interface CloudAsset {
   resource?: { parent?: string; location?: string; data?: Record<string, unknown> };
 }
 interface AssetListResponse { assets?: CloudAsset[]; nextPageToken?: string }
+
+type ResourceDataFieldMap = Record<string, readonly string[]>;
+
+/**
+ * Cloud Asset Inventory can return customer-controlled and workload-adjacent data.
+ * Persist only the small set of scalar fields needed to identify and summarize
+ * supported infrastructure. Never persist arbitrary provider resource payloads.
+ */
+const RESOURCE_DATA_FIELDS: ResourceDataFieldMap = {
+  "compute.googleapis.com/Instance": [
+    "name", "status", "zone", "machineType", "creationTimestamp", "labels",
+  ],
+  "compute.googleapis.com/Disk": [
+    "name", "status", "zone", "region", "sizeGb", "type", "creationTimestamp", "labels",
+  ],
+  "storage.googleapis.com/Bucket": [
+    "name", "location", "storageClass", "timeCreated", "labels",
+  ],
+  "sqladmin.googleapis.com/Instance": [
+    "name", "region", "databaseVersion", "state", "gceZone", "labels",
+  ],
+  "cloudfunctions.googleapis.com/CloudFunction": [
+    "name", "status", "runtime", "availableMemoryMb", "timeout", "entryPoint", "updateTime", "labels",
+  ],
+  "cloudfunctions.googleapis.com/Function": [
+    "name", "state", "runtime", "availableMemory", "timeout", "entryPoint", "updateTime", "labels",
+  ],
+  "compute.googleapis.com/ForwardingRule": [
+    "name", "region", "IPProtocol", "loadBalancingScheme", "portRange", "labels",
+  ],
+  "compute.googleapis.com/Address": [
+    "name", "status", "addressType", "ipVersion", "region", "labels",
+  ],
+  "compute.googleapis.com/Snapshot": [
+    "name", "status", "diskSizeGb", "sourceDisk", "storageBytes", "creationTimestamp", "labels",
+  ],
+};
+
 export async function getImpersonatedAccessToken(serviceAccountEmail: string, targetScope = CLOUD_PLATFORM_READ_SCOPE): Promise<string> {
-  if (!/^[^\\s@]+@[^\\s@]+\\.iam\\.gserviceaccount\\.com$/.test(serviceAccountEmail)) throw new Error("INVALID_GCP_SERVICE_ACCOUNT");
+  if (!/^[^\s@]+@[^\s@]+\.iam\.gserviceaccount\.com$/.test(serviceAccountEmail)) throw new Error("INVALID_GCP_SERVICE_ACCOUNT");
   const sourceAuth = new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/cloud-platform"] });
   const sourceClient = await sourceAuth.getClient();
   const impersonated = new Impersonated({
@@ -47,19 +85,11 @@ export interface GcpConnectorDependencies {
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
-function sanitizeProviderData(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sanitizeProviderData);
-  if (value === null || typeof value !== "object") return value;
-  const result: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (/(environmentvariables?|secret|privatekey|credential|password|accesskey|apikey|authorization|token)/i.test(key)) continue;
-    result[key] = sanitizeProviderData(child);
-  }
-  return result;
-}
+
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
+
 function mapResourceType(assetType: string | undefined): string {
   switch (assetType) {
     case "compute.googleapis.com/Instance": return "compute_instance";
@@ -74,22 +104,66 @@ function mapResourceType(assetType: string | undefined): string {
     default: return "other";
   }
 }
+
 function mapStatus(data: Record<string, unknown>): string | null {
   return stringValue(data.status) ?? stringValue(data.state) ?? stringValue(data.stateName);
 }
+
 function mapLocation(asset: CloudAsset, data: Record<string, unknown>): string | null {
   const direct = stringValue(data.region) ?? stringValue(data.zone) ?? stringValue(data.location);
   if (direct) return direct.split("/").at(-1) ?? direct;
   return stringValue(asset.resource?.location);
 }
+
+const SENSITIVE_LABEL_VALUE = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bASIA[0-9A-Z]{16}\b|\bBearer\s+\S+|\b(password|token|secret|api[_-]?key)\s*[:=]\s*\S+)/i;
+
 function mapLabels(data: Record<string, unknown>): Record<string, string> {
   const labels = record(data.labels);
-  return Object.fromEntries(Object.entries(labels).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  return Object.fromEntries(
+    Object.entries(labels)
+      .filter((entry): entry is [string, string] =>
+        typeof entry[1] === "string" &&
+        entry[0].length <= 63 &&
+        entry[1].length <= 63 &&
+        !/(secret|password|token|credential|key)/i.test(entry[0]) &&
+        !SENSITIVE_LABEL_VALUE.test(entry[1]),
+      )
+      .slice(0, 64),
+  );
 }
+
+/**
+ * Project a provider resource onto an explicit per-type scalar allowlist.
+ * Nested objects, arrays, arbitrary metadata and unknown asset types are dropped.
+ */
+function projectResourceData(assetType: string | undefined, source: Record<string, unknown>): Record<string, unknown> {
+  const allowedFields = RESOURCE_DATA_FIELDS[assetType ?? ""];
+  if (!allowedFields) return {};
+
+  const projected: Record<string, unknown> = {};
+  for (const field of allowedFields) {
+    if (field === "labels") continue;
+    const value = source[field];
+    if (
+      typeof value === "string" ||
+      typeof value === "number" && Number.isFinite(value) ||
+      typeof value === "boolean"
+    ) {
+      projected[field] = value;
+    }
+  }
+
+  const labels = mapLabels(source);
+  if (Object.keys(labels).length > 0) projected.labels = labels;
+  return projected;
+}
+
 export function normalizeGcpAsset(asset: CloudAsset, projectId: string, observedAt: string = new Date().toISOString()): NormalizedCloudResource | null {
   const name = stringValue(asset.name);
   if (!name) return null;
-  const data = record(sanitizeProviderData(asset.resource?.data));
+
+  const sourceData = record(asset.resource?.data);
+  const data = projectResourceData(asset.assetType, sourceData);
   return {
     provider: "gcp",
     providerAccountId: projectId,
@@ -103,7 +177,7 @@ export function normalizeGcpAsset(asset: CloudAsset, projectId: string, observed
       updateTime: asset.updateTime ?? null,
       parent: asset.resource?.parent ?? null,
       status: mapStatus(data),
-      labels: mapLabels(data),
+      labels: mapLabels(sourceData),
       data,
     },
   };

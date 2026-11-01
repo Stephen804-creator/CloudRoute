@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { GcpInventoryConnector, normalizeGcpAsset } from "./index.js";
 
-test("normalizes a Compute Engine instance and preserves provider metadata", () => {
+test("normalizes a Compute Engine instance using approved scalar metadata", () => {
   const result = normalizeGcpAsset({
     name: "//compute.googleapis.com/projects/demo-prod/zones/us-central1-a/instances/web-01",
     assetType: "compute.googleapis.com/Instance",
@@ -17,7 +17,77 @@ test("normalizes a Compute Engine instance and preserves provider metadata", () 
   assert.equal(result.region, "us-central1-a");
   assert.equal(result.rawPayload.status, "RUNNING");
   assert.deepEqual(result.rawPayload.labels, { env: "prod" });
-  assert.equal((result.rawPayload.data as Record<string, unknown>).machineType, "e2-medium");
+  assert.deepEqual(result.rawPayload.data, {
+    name: "web-01",
+    status: "RUNNING",
+    zone: "projects/demo-prod/zones/us-central1-a",
+    machineType: "e2-medium",
+    labels: { env: "prod" },
+  });
+});
+
+test("drops nested workload metadata and fields outside the resource allowlist", () => {
+  const result = normalizeGcpAsset({
+    name: "//compute.googleapis.com/projects/demo-prod/zones/us-central1-a/instances/web-01",
+    assetType: "compute.googleapis.com/Instance",
+    resource: {
+      data: {
+        name: "web-01",
+        status: "RUNNING",
+        machineType: "e2-medium",
+        metadata: { items: [{ key: "startup-script", value: "must-not-persist" }] },
+        serviceAccounts: [{ email: "runtime@demo-prod.iam.gserviceaccount.com", scopes: ["https://example.invalid"] }],
+        networkInterfaces: [{ accessConfigs: [{ natIP: "203.0.113.10" }] }],
+        forwardingRules: [{ IPAddress: "203.0.113.11" }],
+        address: "203.0.113.12",
+        disks: [{ initializeParams: { sourceImage: "private-image" } }],
+        labels: { team: "platform", API_KEY: "must-not-persist", description: "Bearer hidden-token", owner: "password=hidden", nested: { value: "must-not-persist" } },
+      },
+    },
+  }, "demo-prod");
+  assert.ok(result);
+  const serialized = JSON.stringify(result.rawPayload);
+  assert.equal(serialized.includes("must-not-persist"), false);
+  assert.equal(serialized.includes("startup-script"), false);
+  assert.equal(serialized.includes("runtime@demo-prod"), false);
+  assert.equal(serialized.includes("203.0.113.10"), false);
+  assert.equal(serialized.includes("203.0.113.11"), false);
+  assert.equal(serialized.includes("203.0.113.12"), false);
+  assert.equal(serialized.includes("hidden-token"), false);
+  assert.equal(serialized.includes("password=hidden"), false);
+  assert.equal(serialized.includes("private-image"), false);
+  assert.deepEqual(result.rawPayload.data, {
+    name: "web-01",
+    status: "RUNNING",
+    machineType: "e2-medium",
+    labels: { team: "platform" },
+  });
+});
+
+test("redacts function environment variables and nested secret fields", () => {
+  const result = normalizeGcpAsset({
+    name: "//cloudfunctions.googleapis.com/projects/demo-prod/locations/us-central1/functions/worker",
+    assetType: "cloudfunctions.googleapis.com/Function",
+    resource: { data: { name: "worker", state: "ACTIVE", runtime: "nodejs22", environmentVariables: { API_KEY: "must-not-persist" }, secretEnvironmentVariables: [{ key: "TOKEN", projectId: "demo-prod", secret: "secret-name" }], availableMemory: "256M" }, },
+  }, "demo-prod");
+  assert.ok(result);
+  const serialized = JSON.stringify(result.rawPayload);
+  assert.equal(serialized.includes("must-not-persist"), false);
+  assert.equal(serialized.includes("environmentVariables"), false);
+  assert.equal(serialized.includes("secretEnvironmentVariables"), false);
+  assert.equal(serialized.includes("secret-name"), false);
+  assert.equal((result.rawPayload.data as Record<string, unknown>).runtime, "nodejs22");
+});
+
+test("unknown asset types do not persist arbitrary provider data", () => {
+  const result = normalizeGcpAsset({
+    name: "//example.googleapis.com/projects/demo-prod/resources/unknown",
+    assetType: "example.googleapis.com/Unknown",
+    resource: { data: { name: "unknown", arbitrary: "customer-data", nested: { secret: "private" } } },
+  }, "demo-prod");
+  assert.ok(result);
+  assert.deepEqual(result.rawPayload.data, {});
+  assert.equal(JSON.stringify(result.rawPayload).includes("customer-data"), false);
 });
 
 test("maps supported asset types to provider-neutral CloudRoute resource types", () => {
@@ -67,18 +137,4 @@ test("rejects invalid service account and project identifiers", async () => {
   assert.throws(() => new GcpInventoryConnector("not-an-email"), /INVALID_GCP_SERVICE_ACCOUNT/);
   const connector = new GcpInventoryConnector("reader@demo-prod.iam.gserviceaccount.com", { getAccessToken: async () => "token" });
   await assert.rejects(connector.listResources({ provider: "gcp", accountId: "Bad Project ID" }), /INVALID_GCP_PROJECT_ID/);
-});
-
-test("redacts function environment variables and secret-like fields before persistence", () => {
-  const result = normalizeGcpAsset({
-    name: "//cloudfunctions.googleapis.com/projects/demo-prod/locations/us-central1/functions/worker",
-    assetType: "cloudfunctions.googleapis.com/Function",
-    resource: { data: { name: "worker", serviceConfig: { environmentVariables: { API_KEY: "must-not-persist" }, secretEnvironmentVariables: [{ key: "TOKEN", projectId: "demo-prod", secret: "secret-name" }], availableMemory: "256M" }, labels: { team: "platform" } } },
-  }, "demo-prod");
-  assert.ok(result);
-  const serialized = JSON.stringify(result.rawPayload);
-  assert.equal(serialized.includes("must-not-persist"), false);
-  assert.equal(serialized.includes("environmentVariables"), false);
-  assert.equal(serialized.includes("secretEnvironmentVariables"), false);
-  assert.deepEqual(result.rawPayload.labels, { team: "platform" });
 });
