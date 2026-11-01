@@ -70,7 +70,7 @@ test("redacts function environment variables and nested secret fields", () => {
   assert.equal(serialized.includes("environmentVariables"), false);
   assert.equal(serialized.includes("secretEnvironmentVariables"), false);
   assert.equal(serialized.includes("secret-name"), false);
-  assert.equal(result.rawPayload.data.runtime, "nodejs22");
+  assert.equal((result.rawPayload.data as Record<string, unknown>).runtime, "nodejs22");
 });
 
 test("unknown asset types do not persist arbitrary provider data", () => {
