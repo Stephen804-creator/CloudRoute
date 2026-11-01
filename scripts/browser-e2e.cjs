@@ -47,8 +47,21 @@ const { chromium } = require(playwrightPath);
     assert.equal(await password.evaluate((element) => element.validity.tooShort), true);
     await page.getByRole("button", { name: /create account/i }).click();
     assert.equal(signupRequested, false, "browser validation must block a password shorter than 12 characters");
+    await page.unroute("**/v1/auth/signup");
 
-    console.log("Browser E2E smoke tests passed: landing page, login error flow, and signup password validation.");
+    const email = "cloudroute-e2e-" + Date.now() + "@example.test";
+    await page.getByLabel("Full name").fill("CloudRoute Browser QA");
+    await page.getByLabel(/Workspace name/).fill("Browser QA Workspace");
+    await page.getByLabel("Email address").fill(email);
+    await password.fill("a-strong-e2e-password-123");
+    await page.getByRole("button", { name: /create account/i }).click();
+    await page.waitForURL("**/app", { timeout: 20000 });
+    await page.getByRole("heading", { name: "Good to see you." }).waitFor({ state: "visible", timeout: 20000 });
+    await page.getByText(email).waitFor({ state: "visible", timeout: 10000 });
+    await page.getByRole("button", { name: /sign out/i }).click();
+    await page.waitForURL("**/login", { timeout: 15000 });
+
+    console.log("Browser E2E passed: landing page, login error, signup validation, real signup, authenticated dashboard, and sign-out.");
   } finally {
     await browser.close();
   }

@@ -94,9 +94,16 @@ jobs:
 
       - name: Run browser end-to-end smoke tests
         run: |
+          PUBLIC_APP_ORIGIN=http://127.0.0.1:3000 pnpm --filter @cloudroute/api start &
+          API_PID=$!
           pnpm --filter @cloudroute/web start &
           WEB_PID=$!
-          trap 'kill "$WEB_PID" 2>/dev/null || true' EXIT
+          trap 'kill "$WEB_PID" "$API_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:4000/health >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:4000/health >/dev/null
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then break; fi
             sleep 2
