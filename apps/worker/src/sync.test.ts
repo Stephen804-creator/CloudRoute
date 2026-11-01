@@ -15,3 +15,17 @@ test("resource upsert is idempotent on cloud account and external ID", async () 
   assert.match(source, /ON CONFLICT \(cloud_account_id, external_id\) DO UPDATE/);
   assert.match(source, /deleted_detected_at=NULL/);
 });
+
+test("inventory sync rechecks account connection before persisting provider results", async () => {
+  const source = await readFile(fileURLToPath(new URL("./sync.ts", import.meta.url)), "utf8");
+  assert.match(source, /SELECT id FROM cloud_accounts WHERE id=\\$1 AND org_id=\\$2 AND disconnected_at IS NULL FOR UPDATE/);
+  assert.match(source, /error_code='ACCOUNT_DISCONNECTED'/);
+  assert.match(source, /disconnected_at IS NULL/);
+});
+
+test("cost sync rechecks account connection before persisting provider results", async () => {
+  const source = await readFile(fileURLToPath(new URL("./cost-sync.ts", import.meta.url)), "utf8");
+  assert.match(source, /SELECT id FROM cloud_accounts WHERE id=\\$1 AND org_id=\\$2 AND disconnected_at IS NULL FOR UPDATE/);
+  assert.match(source, /error_code='ACCOUNT_DISCONNECTED'/);
+  assert.match(source, /disconnected_at IS NULL/);
+});

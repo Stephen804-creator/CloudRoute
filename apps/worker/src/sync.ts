@@ -108,7 +108,18 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
     let updated = 0;
     let missing = 0;
     const startedAt = claimed.rows[0].started_at;
-    await withOrgTransaction(job.orgId, async (client) => {
+    const persisted = await withOrgTransaction(job.orgId, async (client) => {
+      const activeAccount = await client.query(
+        "SELECT id FROM cloud_accounts WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL FOR UPDATE",
+        [account.id, job.orgId],
+      );
+      if (!activeAccount.rowCount) {
+        await client.query(
+          "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
+          [job.syncRunId, job.orgId],
+        );
+        return false;
+      }
       for (const item of inventory.resources) {
         const upsert = await client.query(
           "INSERT INTO resources(org_id, cloud_account_id, provider, external_id, resource_type, display_name, region, resource_status, tags, metadata, last_seen_at, deleted_detected_at, connector_version) " +
@@ -133,19 +144,28 @@ export async function processInventorySync(job: SyncJob): Promise<void> {
         [job.syncRunId, status, inventory.resources.length, created, updated, missing, inventory.complete ? null : "PARTIAL_PROVIDER_RESPONSE", inventory.complete ? null : inventory.warnings.slice(0, 20).join(","), inventory.complete, job.orgId],
       );
       await client.query(
-        "UPDATE cloud_accounts SET status=$3, last_sync_at=now(), last_sync_status=$4, last_error_code=$5, updated_at=now() WHERE id=$1 AND org_id=$2",
+        "UPDATE cloud_accounts SET status=$3, last_sync_at=now(), last_sync_status=$4, last_error_code=$5, updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL",
         [account.id, job.orgId, inventory.complete ? "connected" : "degraded", status, inventory.complete ? null : "PARTIAL_PROVIDER_RESPONSE"],
       );
+      return true;
     });
+    if (!persisted) return;
   } catch (error) {
     const code = error instanceof Error && /^[A-Z0-9_:-]{1,80}$/.test(error.message) ? error.message : "INVENTORY_SYNC_FAILED";
+    if (code === "ACCOUNT_UNAVAILABLE" || code === "ACCOUNT_DISCONNECTED") {
+      await withOrgTransaction(job.orgId, (client) => client.query(
+        "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED', is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
+        [job.syncRunId, job.orgId],
+      ));
+      return;
+    }
     await withOrgTransaction(job.orgId, async (client) => {
       await client.query(
-        "UPDATE sync_runs SET status='failed', finished_at=now(), error_code=$3, error_message='Inventory sync failed. Check the connection and permissions.', is_complete=false WHERE id=$1 AND org_id=$2",
+        "UPDATE sync_runs SET status='failed', finished_at=now(), error_code=$3, error_message='Inventory sync failed. Check the connection and permissions.', is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
         [job.syncRunId, job.orgId, code],
       );
       await client.query(
-        "UPDATE cloud_accounts SET status='error', last_sync_status='failed', last_error_code=$3, updated_at=now() WHERE id=$1 AND org_id=$2",
+        "UPDATE cloud_accounts SET status='error', last_sync_status='failed', last_error_code=$3, updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL",
         [job.accountId, job.orgId, code],
       );
     });

@@ -139,7 +139,18 @@ export async function processCostSync(job: CostJob): Promise<void> {
     const account = result.rows[0] as Account | undefined;
     if (!account) throw new Error("ACCOUNT_UNAVAILABLE");
     const rows = account.provider === "aws" ? await fetchAwsCosts(account) : account.provider === "gcp" ? await fetchGcpCosts(account) : (() => { throw new Error("UNSUPPORTED_PROVIDER"); })();
-    await withOrgTransaction(job.orgId, async (client) => {
+    const persisted = await withOrgTransaction(job.orgId, async (client) => {
+      const activeAccount = await client.query(
+        "SELECT id FROM cloud_accounts WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL FOR UPDATE",
+        [account.id, job.orgId],
+      );
+      if (!activeAccount.rowCount) {
+        await client.query(
+          "UPDATE sync_runs SET status='cancelled',finished_at=now(),error_code='ACCOUNT_DISCONNECTED',is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
+          [job.syncRunId, job.orgId],
+        );
+        return false;
+      }
       for (const row of rows) {
         const day = row.date.slice(0, 10);
         const next = new Date(day + "T00:00:00.000Z"); next.setUTCDate(next.getUTCDate() + 1);
@@ -151,13 +162,22 @@ export async function processCostSync(job: CostJob): Promise<void> {
         );
       }
       await client.query("UPDATE sync_runs SET status='succeeded',finished_at=now(),resources_seen=$3,is_complete=true WHERE id=$1 AND org_id=$2", [job.syncRunId, job.orgId, rows.length]);
-      await client.query("UPDATE cloud_accounts SET last_cost_sync_at=now(),last_cost_sync_status='succeeded',updated_at=now() WHERE id=$1 AND org_id=$2", [account.id, job.orgId]);
+      await client.query("UPDATE cloud_accounts SET last_cost_sync_at=now(),last_cost_sync_status='succeeded',updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL", [account.id, job.orgId]);
+      return true;
     });
+    if (!persisted) return;
   } catch (error) {
     const code = error instanceof Error && /^[A-Z0-9_:-]{1,80}$/.test(error.message) ? error.message : "COST_SYNC_FAILED";
+    if (code === "ACCOUNT_UNAVAILABLE" || code === "ACCOUNT_DISCONNECTED") {
+      await withOrgTransaction(job.orgId, (client) => client.query(
+        "UPDATE sync_runs SET status='cancelled',finished_at=now(),error_code='ACCOUNT_DISCONNECTED',is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'",
+        [job.syncRunId, job.orgId],
+      ));
+      return;
+    }
     await withOrgTransaction(job.orgId, async (client) => {
-      await client.query("UPDATE sync_runs SET status='failed',finished_at=now(),error_code=$3,error_message='Cost sync failed. Check billing permissions and export configuration.',is_complete=false WHERE id=$1 AND org_id=$2", [job.syncRunId, job.orgId, code]);
-      await client.query("UPDATE cloud_accounts SET last_cost_sync_status='failed',last_error_code=$3,updated_at=now() WHERE id=$1 AND org_id=$2", [job.accountId, job.orgId, code]);
+      await client.query("UPDATE sync_runs SET status='failed',finished_at=now(),error_code=$3,error_message='Cost sync failed. Check billing permissions and export configuration.',is_complete=false WHERE id=$1 AND org_id=$2 AND status='running'", [job.syncRunId, job.orgId, code]);
+      await client.query("UPDATE cloud_accounts SET last_cost_sync_status='failed',last_error_code=$3,updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL", [job.accountId, job.orgId, code]);
     });
     await queueConnectionFailure(job.orgId, job.accountId, code).catch(() => undefined);
     throw error;
