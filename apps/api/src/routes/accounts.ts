@@ -241,11 +241,23 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
 
   app.delete<{ Params: { id: string } }>("/v1/accounts/:id", async (request, reply) => {
     if (!request.authContext) return;
-    const result = await withOrgTransaction(request.authContext.orgId, (client) => client.query(
-      "UPDATE cloud_accounts SET status='disconnected', disconnected_at=now(), updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL RETURNING id",
-      [request.params.id, request.authContext!.orgId],
-    ));
-    if (!result.rowCount) return reply.code(404).send({ error: { code: "ACCOUNT_NOT_FOUND", message: "Cloud account was not found." } });
+    const disconnected = await withOrgTransaction(request.authContext.orgId, async (client) => {
+      const result = await client.query(
+        "UPDATE cloud_accounts SET status='disconnected', disconnected_at=now(), updated_at=now() WHERE id=$1 AND org_id=$2 AND disconnected_at IS NULL RETURNING id",
+        [request.params.id, request.authContext!.orgId],
+      );
+      if (!result.rowCount) return false;
+      await client.query(
+        "UPDATE sync_runs SET status='cancelled', finished_at=now(), error_code='ACCOUNT_DISCONNECTED' WHERE cloud_account_id=$1 AND org_id=$2 AND status IN ('queued','running')",
+        [request.params.id, request.authContext!.orgId],
+      );
+      await client.query(
+        "INSERT INTO audit_log(org_id,actor_user_id,action,target_type,target_id,details) VALUES ($1,$2,'cloud_account.disconnected','cloud_account',$3,'{}'::jsonb)",
+        [request.authContext!.orgId, request.authContext!.userId, request.params.id],
+      );
+      return true;
+    });
+    if (!disconnected) return reply.code(404).send({ error: { code: "ACCOUNT_NOT_FOUND", message: "Cloud account was not found." } });
     return reply.code(204).send();
   });
 }
