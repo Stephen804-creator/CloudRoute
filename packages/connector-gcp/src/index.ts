@@ -115,7 +115,7 @@ function mapLocation(asset: CloudAsset, data: Record<string, unknown>): string |
   return stringValue(asset.resource?.location);
 }
 
-const SENSITIVE_LABEL_VALUE = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|\\bAKIA[0-9A-Z]{16}\\b|\\bASIA[0-9A-Z]{16}\\b|\\bBearer\\s+\\S+|\\b(password|token|secret|api[_-]?key)\\s*[:=]\\s*\\S+)/i;
+const SENSITIVE_LABEL_VALUE = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bASIA[0-9A-Z]{16}\b|\bBearer\s+\S+|\b(password|token|secret|api[_-]?key)\s*[:=]\s*\S+)/i;
 
 function mapLabels(data: Record<string, unknown>): Record<string, string> {
   const labels = record(data.labels);
