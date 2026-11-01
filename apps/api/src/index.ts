@@ -12,6 +12,7 @@ import { registerCostRoutes } from "./routes/costs.js";
 import { registerFindingRoutes } from "./routes/findings.js";
 import { registerResourceHistoryRoutes } from "./routes/resource-history.js";
 import { registerNotificationPreferenceRoutes } from "./routes/notification-preferences.js";
+import { registerOrganizationRoutes } from "./routes/organizations.js";
 import type { AuthContext } from "./auth/session.js";
 import { enforceRateLimit } from "./rate-limit.js";
 
@@ -57,6 +58,7 @@ await registerResourceHistoryRoutes(app);
 await registerCostRoutes(app);
 await registerFindingRoutes(app);
 await registerNotificationPreferenceRoutes(app);
+await registerOrganizationRoutes(app);
 
 const port = Number.parseInt(process.env.PORT ?? "4000", 10);
 const host = process.env.HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");

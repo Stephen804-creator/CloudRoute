@@ -127,3 +127,84 @@ test("row-level security blocks cross-tenant reads, updates, deletes, and insert
     await closePool();
   }
 });
+
+test("organization deletion cascades tenant data but retains the global deletion audit", { skip: !process.env.DATABASE_URL }, async () => {
+  const suffix = randomUUID();
+  let userId = "";
+  let orgId = "";
+  try {
+    const created = await withTransaction(async client => {
+      const user = await client.query<{id:string}>(
+        "INSERT INTO users(email,password_hash,full_name) VALUES ($1,'test-hash','Deletion Test') RETURNING id",
+        ["org-delete-" + suffix + "@example.test"],
+      );
+      const org = await client.query<{id:string}>(
+        "INSERT INTO organizations(name,created_by) VALUES ($1,$2) RETURNING id",
+        ["Delete Test " + suffix,user.rows[0]!.id],
+      );
+      await client.query("SELECT set_config('app.current_org_id',$1,true)",[org.rows[0]!.id]);
+      await client.query("INSERT INTO memberships(org_id,user_id,role) VALUES ($1,$2,'owner')",[org.rows[0]!.id,user.rows[0]!.id]);
+      return {userId:user.rows[0]!.id,orgId:org.rows[0]!.id};
+    });
+    userId=created.userId; orgId=created.orgId;
+    await withOrgTransaction(orgId, async client => {
+      const account=await client.query<{id:string}>(
+        "INSERT INTO cloud_accounts(org_id,provider,display_name,external_account_id,role_arn,external_id) VALUES ($1,'aws','Deletion AWS',$2,NULL,'external') RETURNING id",
+        [orgId,"123456789011"],
+      );
+      const resource=await client.query<{id:string}>(
+        "INSERT INTO resources(org_id,cloud_account_id,provider,external_id,resource_type) VALUES ($1,$2,'aws',$3,'compute_instance') RETURNING id",
+        [orgId,account.rows[0]!.id,"delete-"+suffix],
+      );
+      await client.query(
+        "INSERT INTO cost_records(org_id,cloud_account_id,provider,period_start,period_end,service,amount,currency) VALUES ($1,$2,'aws',CURRENT_DATE,CURRENT_DATE+1,'EC2',1,'USD')",
+        [orgId,account.rows[0]!.id],
+      );
+      await client.query(
+        "INSERT INTO findings(org_id,cloud_account_id,resource_id,rule_key,title,description) VALUES ($1,$2,$3,'delete_test','Delete test','fixture')",
+        [orgId,account.rows[0]!.id,resource.rows[0]!.id],
+      );
+      await client.query(
+        "INSERT INTO sync_runs(org_id,cloud_account_id,job_type,status) VALUES ($1,$2,'inventory_sync','queued')",
+        [orgId,account.rows[0]!.id],
+      );
+      await client.query("INSERT INTO notification_preferences(org_id) VALUES ($1)",[orgId]);
+      await client.query(
+        "INSERT INTO email_outbox(org_id,recipient,template_key,dedupe_key) VALUES ($1,'delete@example.test','weekly_digest',$2)",
+        [orgId,"delete:"+suffix],
+      );
+      await client.query(
+        "INSERT INTO organization_deletion_audit(organization_id,organization_name,deleted_by,details) VALUES ($1,$2,$3,$4::jsonb)",
+        [orgId,"Delete Test "+suffix,userId,JSON.stringify({confirmed:true})],
+      );
+    });
+    await withTransaction(async client => {
+      await client.query("DELETE FROM organizations WHERE id=$1",[orgId]);
+      const counts=await Promise.all([
+        client.query("SELECT 1 FROM memberships WHERE org_id=$1",[orgId]),
+        client.query("SELECT 1 FROM cloud_accounts WHERE org_id=$1",[orgId]),
+        client.query("SELECT 1 FROM resources WHERE org_id=$1",[orgId]),
+        client.query("SELECT 1 FROM cost_records WHERE org_id=$1",[orgId]),
+        client.query("SELECT 1 FROM findings WHERE org_id=$1",[orgId]),
+        client.query("SELECT 1 FROM sync_runs WHERE org_id=$1",[orgId]),
+        client.query("SELECT 1 FROM audit_log WHERE org_id=$1",[orgId]),
+        client.query("SELECT 1 FROM notification_preferences WHERE org_id=$1",[orgId]),
+        client.query("SELECT 1 FROM email_outbox WHERE org_id=$1",[orgId]),
+      ]);
+      for(const result of counts) assert.equal(result.rowCount,0,"organization-owned data must cascade on organization deletion");
+      const retained=await client.query(
+        "SELECT organization_name,deleted_by FROM organization_deletion_audit WHERE organization_id=$1",
+        [orgId],
+      );
+      assert.equal(retained.rowCount,1);
+      assert.equal(retained.rows[0]?.organization_name,"Delete Test "+suffix);
+      assert.equal(retained.rows[0]?.deleted_by,userId);
+    });
+  } finally {
+    await withTransaction(async client => {
+      if(orgId) await client.query("DELETE FROM organizations WHERE id=$1",[orgId]);
+      if(userId) await client.query("DELETE FROM users WHERE id=$1",[userId]);
+    });
+    await closePool();
+  }
+});
