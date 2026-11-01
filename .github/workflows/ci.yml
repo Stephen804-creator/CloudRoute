@@ -94,7 +94,7 @@ jobs:
 
       - name: Run browser end-to-end smoke tests
         run: |
-          pnpm --filter @cloudroute/web start -- --hostname 127.0.0.1 --port 3000 &
+          pnpm --filter @cloudroute/web start &
           WEB_PID=$!
           trap 'kill "$WEB_PID" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 60); do

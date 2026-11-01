@@ -52,10 +52,20 @@ test("unknown API routes return 404", async () => {
 });
 
 test("tenant-scoped endpoints reject requests without a session", async () => {
-  for (const url of ["/v1/organizations/11111111-1111-4111-8111-111111111111", "/v1/accounts", "/v1/resources", "/v1/overview", "/v1/costs/summary", "/v1/costs/breakdown", "/v1/findings", "/v1/notification-preferences", "/v1/resources/11111111-1111-4111-8111-111111111111/history"]) {
+  for (const url of ["/v1/accounts", "/v1/resources", "/v1/overview", "/v1/costs/summary", "/v1/costs/breakdown", "/v1/findings", "/v1/notification-preferences", "/v1/resources/11111111-1111-4111-8111-111111111111/history"]) {
     const response = await app.inject({ method: "GET", url });
     assert.equal(response.statusCode, 401, url + " must require authentication");
   }
+});
+
+test("organization deletion requires authentication", async () => {
+  const response = await app.inject({
+    method: "DELETE",
+    url: "/v1/organizations/11111111-1111-4111-8111-111111111111",
+    headers: { "content-type": "application/json" },
+    payload: { confirmName: "Example workspace" },
+  });
+  assert.equal(response.statusCode, 401);
 });
 
 test("sign-up rejects weak passwords before database access", async () => {
