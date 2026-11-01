@@ -22,6 +22,25 @@ export function getRateLimitPolicy(method: string, route: string): RateLimitPoli
   return { bucket: "read", limit: 300, windowSeconds: 60 };
 }
 
+export async function incrementRateLimitBucket(
+  bucketKey: string,
+  windowSeconds: number,
+): Promise<{ requestCount: number; windowStartedAt: Date | string }> {
+  const result = await query<{ request_count: number; window_started_at: Date | string }>(
+    "INSERT INTO api_rate_limits(bucket_key,window_started_at,request_count,expires_at) " +
+    "VALUES ($1,to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2),1,now()+($2::int * interval '2 seconds')) " +
+    "ON CONFLICT (bucket_key) DO UPDATE SET " +
+    "request_count=CASE WHEN api_rate_limits.window_started_at < to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2) THEN 1 ELSE api_rate_limits.request_count+1 END, " +
+    "window_started_at=to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2), " +
+    "expires_at=now()+($2::int * interval '2 seconds') " +
+    "RETURNING request_count,window_started_at",
+    [bucketKey, windowSeconds],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("RATE_LIMIT_COUNTER_UNAVAILABLE");
+  return { requestCount: Number(row.request_count), windowStartedAt: row.window_started_at };
+}
+
 let requestsSinceCleanup = 0;
 
 export async function enforceRateLimit(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -36,18 +55,9 @@ export async function enforceRateLimit(request: FastifyRequest, reply: FastifyRe
     .digest("hex");
 
   try {
-    const result = await query<{ request_count: number; window_started_at: Date | string }>(
-      "INSERT INTO api_rate_limits(bucket_key,window_started_at,request_count,expires_at) " +
-      "VALUES ($1,to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2),1,now()+($2::int * interval '2 seconds')) " +
-      "ON CONFLICT (bucket_key) DO UPDATE SET " +
-      "request_count=CASE WHEN api_rate_limits.window_started_at < to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2) THEN 1 ELSE api_rate_limits.request_count+1 END, " +
-      "window_started_at=to_timestamp(floor(extract(epoch FROM clock_timestamp()) / $2) * $2), " +
-      "expires_at=now()+($2::int * interval '2 seconds') " +
-      "RETURNING request_count,window_started_at",
-      [bucketKey, policy.windowSeconds],
-    );
-    const count = Number(result.rows[0]?.request_count ?? 0);
-    const windowStart = new Date(result.rows[0]?.window_started_at ?? Date.now()).getTime();
+    const counter = await incrementRateLimitBucket(bucketKey, policy.windowSeconds);
+    const count = counter.requestCount;
+    const windowStart = new Date(counter.windowStartedAt).getTime();
     if (count > policy.limit) {
       const retryAfter = Math.max(1, Math.ceil((windowStart + policy.windowSeconds * 1000 - Date.now()) / 1000));
       reply.header("retry-after", String(retryAfter));
