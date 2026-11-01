@@ -29,3 +29,16 @@ test("cost sync rechecks account connection before persisting provider results",
   assert.match(source, /error_code='ACCOUNT_DISCONNECTED'/);
   assert.match(source, /disconnected_at IS NULL/);
 });
+
+test("inventory and cost syncs use expiring ownership leases before persistence", async () => {
+  const inventory = await readFile(fileURLToPath(new URL("./sync.ts", import.meta.url)), "utf8");
+  const costs = await readFile(fileURLToPath(new URL("./cost-sync.ts", import.meta.url)), "utf8");
+  for (const source of [inventory, costs]) {
+    assert.match(source, /lease_token=\$4/);
+    assert.match(source, /lease_expires_at=now\(\)\+interval '15 minutes'/);
+    assert.match(source, /lease_token=\$3 AND lease_expires_at>now\(\) FOR UPDATE/);
+    assert.match(source, /setInterval\(\(\) =>/);
+  }
+  assert.match(inventory, /recoverExpiredSyncRunsOnce/);
+  assert.match(inventory, /WORKER_LEASE_EXPIRED/);
+});
