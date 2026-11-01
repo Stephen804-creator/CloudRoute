@@ -62,8 +62,8 @@ export async function queueConnectionFailure(orgId: string, accountId: string, e
     if (!account.rows[0]) return;
     const dedupe = "connection_failure:" + accountId + ":" + errorCode + ":" + new Date().toISOString().slice(0, 13);
     await client.query(
-      "INSERT INTO email_outbox(org_id,recipient,template_key,dedupe_key,payload) VALUES ($1,$2,'connection_failure',$3,$4::jsonb) ON CONFLICT (org_id,dedupe_key) DO NOTHING",
-      [orgId, owner.rows[0].email, dedupe, JSON.stringify({ accountName: account.rows[0].display_name, provider: account.rows[0].provider, errorCode })],
+      "INSERT INTO email_outbox(org_id,cloud_account_id,recipient,template_key,dedupe_key,payload) VALUES ($1,$2,$3,'connection_failure',$4,$5::jsonb) ON CONFLICT (org_id,dedupe_key) DO NOTHING",
+      [orgId, accountId, owner.rows[0].email, dedupe, JSON.stringify({ accountName: account.rows[0].display_name, provider: account.rows[0].provider, errorCode })],
     );
   });
 }
@@ -107,9 +107,9 @@ export async function deliverQueuedEmailsOnce(): Promise<boolean> {
   for (const organization of organizations.rows) {
     const claim = await withOrgTransaction(organization.id, async (client) => {
       const selected = await client.query<{
-        id: string; recipient: string; template_key: string; payload: Record<string, unknown>; attempts: number;
+        id: string; recipient: string; template_key: string; payload: Record<string, unknown>; attempts: number; cloud_account_id: string | null;
       }>(
-        "SELECT id,recipient,template_key,payload,attempts FROM email_outbox " +
+        "SELECT id,recipient,template_key,payload,attempts,cloud_account_id FROM email_outbox " +
         "WHERE attempts < $1 AND next_attempt_at <= now() AND status IN ('queued','failed','sending') " +
         "ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",
         [MAX_EMAIL_ATTEMPTS],
@@ -124,6 +124,14 @@ export async function deliverQueuedEmailsOnce(): Promise<boolean> {
     });
     const item = claim;
     if (!item) continue;
+    if (item.cloud_account_id) {
+      const stillActive = await withOrgTransaction(organization.id, client => client.query(
+        "SELECT e.id FROM email_outbox e JOIN cloud_accounts a ON a.id=e.cloud_account_id AND a.org_id=e.org_id " +
+        "WHERE e.id=$1 AND e.org_id=$2 AND e.cloud_account_id=$3 AND a.disconnected_at IS NULL",
+        [item.id, organization.id, item.cloud_account_id],
+      ));
+      if (!stillActive.rowCount) continue;
+    }
     try {
       const message = emailText(item.template_key, item.payload);
       const response = await fetch("https://api.resend.com/emails", {

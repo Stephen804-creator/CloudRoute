@@ -37,6 +37,11 @@ test("row-level security blocks cross-tenant reads, updates, deletes, and insert
       await client.query("INSERT INTO notification_preferences(org_id) VALUES ($1)",[orgA]);
       const outbox=await client.query<{id:string}>("INSERT INTO email_outbox(org_id,recipient,template_key,dedupe_key) VALUES ($1,'tenant-a@example.test','weekly_digest',$2) RETURNING id",[orgA,"rls-test:"+suffix]);
       ids.outbox=outbox.rows[0]!.id;
+      const accountOutbox=await client.query<{id:string}>(
+        "INSERT INTO email_outbox(org_id,cloud_account_id,recipient,template_key,dedupe_key,payload) VALUES ($1,$2,'tenant-a@example.test','connection_failure',$3,'{}'::jsonb) RETURNING id",
+        [orgA,accountA,"connection_failure:"+accountA+":TEST:2026-11-01T10"],
+      );
+      ids.accountOutbox=accountOutbox.rows[0]!.id;
       const sync=await client.query<{id:string}>(
         "INSERT INTO sync_runs(org_id,cloud_account_id,job_type,status) VALUES ($1,$2,'inventory_sync','queued') RETURNING id",
         [orgA,accountA],
@@ -116,6 +121,7 @@ test("row-level security blocks cross-tenant reads, updates, deletes, and insert
       assert.equal(audit.rows[0]?.details?.accountDataDeleted,true);
       assert.equal((await client.query("SELECT 1 FROM notification_preferences WHERE org_id=$1",[orgA])).rowCount,1);
       assert.equal((await client.query("SELECT 1 FROM email_outbox WHERE id=$1",[ids.outbox])).rowCount,1);
+      assert.equal((await client.query("SELECT 1 FROM email_outbox WHERE id=$1",[ids.accountOutbox])).rowCount,0,"account-specific connection notifications must be deleted with the account");
     });
   } finally {
     if(orgA||orgB) await withTransaction(async client=>{
