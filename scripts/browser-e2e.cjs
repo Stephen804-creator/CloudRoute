@@ -13,7 +13,12 @@ const { chromium } = require(playwrightPath);
     const landingHeading = await page.getByRole("heading", { level: 1 }).innerText();
     assert.match(landingHeading, /Your cloud landscape/i);
 
-    await page.goto("http://127.0.0.1:3000/login", { waitUntil: "networkidle" });
+    const loginResponse = await page.goto("http://127.0.0.1:3000/login", { waitUntil: "networkidle" });
+    assert.equal(loginResponse.status(), 200);
+    const responseHeaders = await loginResponse.allHeaders();
+    assert.equal(responseHeaders["x-content-type-options"], "nosniff");
+    assert.equal(responseHeaders["x-frame-options"], "DENY");
+    assert.equal(responseHeaders["permissions-policy"], "camera=(), microphone=(), geolocation=()");
     let loginPayload;
     await page.route("**/v1/auth/login", async (route) => {
       loginPayload = route.request().postDataJSON();
