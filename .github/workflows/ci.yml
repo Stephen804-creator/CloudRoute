@@ -86,3 +86,20 @@ jobs:
         run: pnpm typecheck
       - name: Run tests including PostgreSQL tenant isolation
         run: pnpm test
+
+      - name: Install Playwright Chromium for browser tests
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cloudroute-e2e" --no-save --no-package-lock playwright@1.56.1
+          "$RUNNER_TEMP/cloudroute-e2e/node_modules/.bin/playwright" install --with-deps chromium
+
+      - name: Run browser end-to-end smoke tests
+        run: |
+          pnpm --filter @cloudroute/web start -- --hostname 127.0.0.1 --port 3000 &
+          WEB_PID=$!
+          trap 'kill "$WEB_PID" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3000/login >/dev/null
+          PLAYWRIGHT_MODULE_DIR="$RUNNER_TEMP/cloudroute-e2e/node_modules/playwright" node scripts/browser-e2e.cjs
