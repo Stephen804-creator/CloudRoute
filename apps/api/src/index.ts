@@ -1,37 +1,75 @@
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import Fastify from "fastify";
+import type { ConnectorAccount, ReadOnlyCloudConnector } from "@cloudroute/connector-sdk";
+import type { NormalizedCloudResource } from "@cloudroute/shared";
 
-const app = Fastify({
-  logger: process.env.NODE_ENV !== "test",
-  bodyLimit: 1_048_576,
-});
+const getDemoMode = () => process.env.CLOUDROUTE_DEMO_MODE === "1";
 
-app.get("/health", async () => ({
-  status: "ok",
-  service: "cloudroute-api",
-  mode: "read-only",
-}));
+const demoResources = (accountId: string): NormalizedCloudResource[] => [
+  {
+    provider: "gcp",
+    providerAccountId: accountId,
+    providerResourceId: "projects/demo/zones/us-central1-a/instances/api-prod-01",
+    resourceType: "compute:instance",
+    region: "us-central1-a",
+    displayName: "api-prod-01",
+    observedAt: new Date().toISOString(),
+    rawPayload: {
+      type: "compute",
+      resourceId: "projects/demo/zones/us-central1-a/instances/api-prod-01",
+      zone: "us-central1-a",
+    },
+    tags: { env: "prod", service: "api" },
+    cost: {
+      amount: 19.42,
+      currency: "USD",
+      attribution: "provider-reported",
+    },
+  },
+  {
+    provider: "gcp",
+    providerAccountId: accountId,
+    providerResourceId: "projects/demo/regions/us-central1/buckets/cloudroute-artifacts",
+    resourceType: "storage:bucket",
+    region: "us-central1",
+    displayName: "cloudroute-artifacts",
+    observedAt: new Date().toISOString(),
+    rawPayload: {
+      type: "storage",
+      bucket: "cloudroute-artifacts",
+      location: "us-central1",
+    },
+    tags: { env: "prod", purpose: "artifacts" },
+    cost: null,
+  },
+];
 
-const port = Number.parseInt(process.env.PORT ?? "4000", 10);
-const host = process.env.HOST ?? "127.0.0.1";
+export const gcpConnectorStatus = {
+  provider: "gcp",
+  status: "disconnected",
+  message: "GCP connector is ready for read-only project discovery but no live project is configured yet.",
+  lastSyncAt: null,
+} as const;
 
-if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-  throw new Error("PORT must be an integer between 1 and 65535");
-}
+export const gcpConnector: ReadOnlyCloudConnector = {
+  provider: "gcp",
+  async validateConnection(account: ConnectorAccount): Promise<void> {
+    if (!account.accountId || account.accountId.trim().length === 0) {
+      throw new Error("GCP project ID is required for a read-only validation.");
+    }
 
-const invokedPath = process.argv[1];
-const isEntrypoint =
-  invokedPath !== undefined &&
-  import.meta.url === pathToFileURL(resolve(invokedPath)).href;
+    if (!getDemoMode()) {
+      throw new Error("GCP demo mode is disabled. Set CLOUDROUTE_DEMO_MODE=1 to exercise the connector contract locally.");
+    }
+  },
+  async listResources(account: ConnectorAccount, pageToken?: string): Promise<{ resources: NormalizedCloudResource[]; nextPageToken: string | null }> {
+    if (!getDemoMode()) {
+      return { resources: [], nextPageToken: null };
+    }
 
-if (isEntrypoint) {
-  try {
-    await app.listen({ port, host });
-  } catch (error) {
-    app.log.error(error, "API startup failed");
-    process.exitCode = 1;
-  }
-}
+    return {
+      resources: demoResources(account.accountId),
+      nextPageToken: pageToken ? null : "gcp-demo-page",
+    };
+  },
+};
 
-export { app };
+export default gcpConnector;

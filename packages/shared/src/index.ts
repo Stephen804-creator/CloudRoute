@@ -22,4 +22,18 @@ export interface NormalizedCloudResource {
   displayName: string | null;
   observedAt: string;
   rawPayload: Record<string, unknown>;
+  tags?: Record<string, string>;
+  cost?: {
+    amount: number;
+    currency: string;
+    attribution: "provider-reported" | "estimate" | "unknown";
+  } | null;
+}
+
+export interface ConnectorHealthSnapshot {
+  provider: CloudProvider;
+  status: ConnectionStatus;
+  message: string;
+  accountId?: string;
+  lastSyncAt?: string | null;
 }

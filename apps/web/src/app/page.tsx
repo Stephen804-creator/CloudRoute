@@ -1,75 +1,32 @@
-const capabilities = [
-  {
-    number: "01",
-    title: "Unified inventory",
-    description: "Bring supported AWS and Google Cloud resources into one searchable view.",
-    status: "Planned",
-  },
-  {
-    number: "02",
-    title: "Cost visibility",
-    description: "Review provider-reported costs with clear attribution and data freshness.",
-    status: "Planned",
-  },
-  {
-    number: "03",
-    title: "Sync health",
-    description: "See connection status and when cloud data was last successfully refreshed.",
-    status: "Foundation",
-  },
-];
+import assert from "node:assert/strict";
+import test from "node:test";
+import { app } from "./index.js";
 
-export default function HomePage() {
-  return (
-    <main className="shell">
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="CloudRoute home">
-          <span className="brand-mark" aria-hidden="true">C</span>
-          <span>CloudRoute</span>
-        </a>
-        <span className="mode-badge"><span /> Read-only by design</span>
-      </header>
+test("GET /health reports API liveness and read-only mode", async () => {
+  const response = await app.inject({ method: "GET", url: "/health" });
 
-      <section className="hero">
-        <p className="eyebrow">MULTI-CLOUD VISIBILITY</p>
-        <h1>Your cloud landscape,<br /><span>one clear route.</span></h1>
-        <p className="hero-copy">
-          A calmer way to understand cloud resources, spending, and sync health
-          across providers — without giving a dashboard permission to change your infrastructure.
-        </p>
-        <div className="hero-actions">
-          <a className="primary-button" href="#capabilities">Explore the foundation <span aria-hidden="true">→</span></a>
-          <span className="build-status"><span className="status-dot" /> Foundation in progress</span>
-        </div>
-        <div className="notice" role="note">
-          <span className="notice-icon" aria-hidden="true">i</span>
-          <p><strong>No cloud accounts are connected.</strong> This page is the initial product foundation, not a live inventory or cost report. No demo figures are shown as real data.</p>
-        </div>
-      </section>
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), {
+    status: "ok",
+    service: "cloudroute-api",
+    mode: "read-only",
+  });
+});
 
-      <section className="capabilities" id="capabilities" aria-labelledby="capabilities-title">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">THE MVP FOUNDATION</p>
-            <h2 id="capabilities-title">Built around clarity.</h2>
-          </div>
-          <p className="section-note">Useful signals first. Cloud control actions are out of scope for the MVP.</p>
-        </div>
-        <div className="capability-grid">
-          {capabilities.map((item) => (
-            <article className="capability-card" key={item.number}>
-              <div className="card-topline"><span>{item.number}</span><span className={item.status === "Foundation" ? "tag tag-active" : "tag"}>{item.status}</span></div>
-              <h3>{item.title}</h3>
-              <p>{item.description}</p>
-            </article>
-          ))}
-        </div>
-      </section>
+test("GET /providers reports the provider connector status", async () => {
+  const response = await app.inject({ method: "GET", url: "/providers" });
 
-      <footer className="footer">
-        <span>CloudRoute <span className="footer-muted">· MVP foundation</span></span>
-        <span>Observe clearly. Act carefully.</span>
-      </footer>
-    </main>
-  );
-}
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().mode, "read-only");
+  assert.equal(Array.isArray(response.json().providers), true);
+  assert.equal(response.json().providers.length, 2);
+});
+
+test("unknown API routes return 404", async () => {
+  const response = await app.inject({ method: "GET", url: "/not-a-route" });
+  assert.equal(response.statusCode, 404);
+});
+
+test.after(async () => {
+  await app.close();
+});
